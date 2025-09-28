@@ -149,4 +149,6 @@ __pycache__
 *.pyc
 .env.local
 .next
-.github
+# Allow GitHub Actions workflows
+!.github/
+!.github/workflows/
