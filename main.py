@@ -1418,13 +1418,45 @@ def check_for_ffmpeg():
 
 def check_for_shaka():
     try:
-        subprocess.Popen(
-            ["shaka-packager", "-version"],
-            stderr=subprocess.DEVNULL,
-            stdout=subprocess.DEVNULL,
-        ).wait()
-        return True
-    except FileNotFoundError:
+        # First, try from PATH
+        try:
+            subprocess.Popen(
+                ["shaka-packager", "-version"],
+                stderr=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+            ).wait()
+            return True
+        except FileNotFoundError:
+            pass
+
+        # Fallback: look in packaged tools directory (one-click installer)
+        try:
+            if getattr(sys, "frozen", False):
+                bin_dir = os.path.dirname(sys.executable)
+                root_dir = os.path.dirname(bin_dir)
+            else:
+                root_dir = os.path.dirname(MAIN_SCRIPT_PATH)
+            tools_dir = os.path.join(root_dir, "tools")
+
+            candidates = [
+                "shaka-packager.exe" if os.name == "nt" else "shaka-packager",
+            ]
+            if os.name == "nt":
+                candidates += ["packager.exe", "packager-win-x64.exe"]
+
+            for name in candidates:
+                candidate_path = os.path.join(tools_dir, name)
+                if os.path.exists(candidate_path):
+                    subprocess.Popen(
+                        [candidate_path, "-version"],
+                        stderr=subprocess.DEVNULL,
+                        stdout=subprocess.DEVNULL,
+                    ).wait()
+                    return True
+        except FileNotFoundError:
+            return False
+
+        # If not found anywhere
         return False
     except Exception:
         logger.exception(

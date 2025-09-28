@@ -36,12 +36,13 @@ Name: "desktopicon"; Description: "Create a &desktop icon"; GroupDescription: "A
 Source: "..\..\bin\serp-companion.exe"; DestDir: "{app}\bin"; Flags: ignoreversion
 Source: "..\..\bin\udemy-downloader.exe"; DestDir: "{app}\bin"; Flags: ignoreversion
 
-; Bundled tools (located in repo root tools\) — optional wildcard
+; Bundled tools (located in repo root tools\) — wildcard for any extras
 Source: "..\..\tools\*"; DestDir: "{app}\tools"; Flags: ignoreversion recursesubdirs createallsubdirs skipifsourcedoesntexist
-; Explicit common tool binaries (included if present)
+; Explicit common tool binaries (ensure critical ones exist)
 Source: "..\..\tools\ffmpeg.exe"; DestDir: "{app}\tools"; Flags: ignoreversion skipifsourcedoesntexist
 Source: "..\..\tools\ffprobe.exe"; DestDir: "{app}\tools"; Flags: ignoreversion skipifsourcedoesntexist
-Source: "..\..\tools\shaka-packager.exe"; DestDir: "{app}\tools"; Flags: ignoreversion skipifsourcedoesntexist
+; Shaka Packager is required for DRM/dash workflows; fail build if missing
+Source: "..\..\tools\shaka-packager.exe"; DestDir: "{app}\tools"; Flags: ignoreversion
 Source: "..\..\tools\yt-dlp.exe"; DestDir: "{app}\tools"; Flags: ignoreversion skipifsourcedoesntexist
 Source: "..\..\tools\aria2c.exe"; DestDir: "{app}\tools"; Flags: ignoreversion skipifsourcedoesntexist
 ; Include repo's aria2c.exe by default (root) as final fallback

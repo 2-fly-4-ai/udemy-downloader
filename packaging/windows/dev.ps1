@@ -79,6 +79,36 @@ function Build-Installer {
   & $iscc $iss | Out-Host
 }
 
+function Ensure-Tools {
+  param([string]$RepoRoot)
+  $toolsDir = Join-Path $RepoRoot 'tools'
+  if (-not (Test-Path $toolsDir)) {
+    New-Item -ItemType Directory -Path $toolsDir | Out-Null
+  }
+
+  # Always ensure Shaka Packager is bundled so installs work out-of-the-box
+  $shakaPath = Join-Path $toolsDir 'shaka-packager.exe'
+  if (-not (Test-Path $shakaPath)) {
+    Write-Host 'Fetching latest Shaka Packager for Windows (x64)...' -ForegroundColor Cyan
+    try {
+      # Some environments need explicit TLS 1.2
+      try { [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12 } catch { }
+      $release = Invoke-RestMethod -UseBasicParsing -Uri 'https://api.github.com/repos/shaka-project/shaka-packager/releases/latest'
+      $asset = $release.assets | Where-Object { $_.name -eq 'packager-win-x64.exe' } | Select-Object -First 1
+      if (-not $asset) { throw 'Could not find packager-win-x64.exe in latest release assets.' }
+      $tmp = Join-Path $env:TEMP ('packager-win-x64_' + $release.tag_name + '.exe')
+      Invoke-WebRequest -UseBasicParsing -Uri $asset.browser_download_url -OutFile $tmp
+      Copy-Item $tmp $shakaPath -Force
+      Remove-Item $tmp -Force
+      Write-Host ("Placed: " + $shakaPath) -ForegroundColor Green
+    } catch {
+      throw "Failed to fetch Shaka Packager: $($_.Exception.Message)"
+    }
+  } else {
+    Write-Host 'Shaka Packager already present in tools\' -ForegroundColor DarkGray
+  }
+}
+
 function Start-PairServer {
   $installRoot = Find-InstallRoot
   if (-not $installRoot) { throw 'Installed app not found. Run the installer first.' }
@@ -101,7 +131,7 @@ if (-not ($Setup -or $Build -or $Installer -or $HotReplace -or $Pair -or $Zip -o
 if ($Setup) { Ensure-Venv -RepoRoot $repo }
 if ($Build) { Build-Exes -RepoRoot $repo }
 if ($HotReplace) { HotReplace -RepoRoot $repo }
-if ($Installer) { Build-Installer -RepoRoot $repo }
+if ($Installer) { Ensure-Tools -RepoRoot $repo; Build-Installer -RepoRoot $repo }
 if ($Pair) { Start-PairServer }
 if ($Zip) {
   $outDir = Join-Path $repo 'dist-installer'

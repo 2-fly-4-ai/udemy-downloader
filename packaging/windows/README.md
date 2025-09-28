@@ -15,9 +15,10 @@ Build Steps (for maintainers)
    - Outputs: `bin\\serp-companion.exe`, `bin\\udemy-downloader.exe`
 
 2) Prepare tools folder (repo root)
-   - Place `ffmpeg.exe` (and required DLLs) under repo root `tools\\` (e.g., `tools\\ffmpeg.exe`)
-   - Place `aria2c.exe` under repo root (already present) or into `tools\\`
-   - Place `shaka-packager.exe` under repo root `tools\\` (rename to `packager.exe` if desired)
+   - Shaka Packager: auto-fetched on `-Installer`/`-Release` by `dev.ps1` and placed as `tools\\shaka-packager.exe`.
+     - You may also provide it manually; any of `shaka-packager.exe`, `packager.exe`, or `packager-win-x64.exe` under `tools\\` are supported.
+   - Optional: Place `ffmpeg.exe` (and required DLLs) under repo root `tools\\` (e.g., `tools\\ffmpeg.exe`)
+   - Optional: Place `aria2c.exe` and `yt-dlp.exe` into `tools\\` if you want them bundled
 
 3) Set extension ID in installer script
    - Edit `packaging\\windows\\installer.iss` → set `#define MyExtensionId "<your_id>"`
@@ -48,6 +49,7 @@ Install Experience (for users)
 Notes
 - The host requires the frozen `bin\\udemy-downloader.exe` on Windows (no Python `main.py` fallback). If it’s missing, jobs fail with `packaged_exe_not_found`.
 - The host prepends `{app}\\tools` to PATH, so included tools are used automatically
+- The installer build enforces `tools\\shaka-packager.exe` to exist; the build script ensures it by downloading the latest release automatically.
 - DRM keys still need to be provided by the user (`keyfile.json` in `{app}`)
 
 Troubleshooting
