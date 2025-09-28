@@ -15,6 +15,17 @@ chrome.runtime.onMessage.addListener((msg) => {
     log(msg.line);
   } else if (msg.kind === 'event' && msg.type === 'job.started') {
     log(`[job ${msg.jobId}] started`);
+    // If host provided args, show them and extract output directory
+    if (Array.isArray(msg.args)) {
+      try {
+        const argsStr = msg.args.join(' ');
+        log(`[job ${msg.jobId}] args: ${argsStr}`);
+        const idx = msg.args.indexOf('-o');
+        if (idx >= 0 && msg.args[idx + 1]) {
+          log(`[job ${msg.jobId}] output: ${msg.args[idx + 1]}`);
+        }
+      } catch (_) {}
+    }
     currentJobId = msg.jobId;
   } else if (msg.kind === 'event' && msg.type === 'job.completed') {
     log(`[job ${msg.jobId}] completed (${msg.code})`);
@@ -62,6 +73,12 @@ $('start').addEventListener('click', () => {
   };
   const q = $('quality').value.trim();
   if (q) payload.quality = parseInt(q, 10);
+  const out = $('outDir') ? $('outDir').value.trim() : '';
+  if (out) payload.outDir = out;
+  // Persist last used output directory
+  try {
+    chrome.storage?.local?.set({ outDir: out }).catch?.(() => {});
+  } catch (_) {}
   chrome.runtime.sendMessage({ type: 'udemy.start', payload }, (resp) => {
     if (!resp || !resp.ok) log(`[err] start: ${resp && resp.error}`);
   });
@@ -96,6 +113,12 @@ $('pair').addEventListener('click', async () => {
 // Attempt auto-pair on popup open (no-op if server not running)
 document.addEventListener('DOMContentLoaded', async () => {
   try {
+    // Load last used output directory
+    try {
+      const saved = await chrome.storage?.local?.get?.('outDir');
+      if (saved && saved.outDir && $('outDir')) $('outDir').value = saved.outDir;
+    } catch (_) {}
+
     const id = chrome.runtime.id;
     const url = `http://127.0.0.1:60123/pair?extId=${id}`;
     const res = await fetch(url);
