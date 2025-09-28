@@ -18,6 +18,8 @@ AppPublisher={#MyAppPublisher}
 DefaultDirName={autopf}\SERP Companion
 DefaultGroupName=SERP Companion
 OutputBaseFilename=SERP-Companion-Setup
+; Emit installer EXE to repo-root dist-installer\
+OutputDir=..\..\dist-installer
 Compression=lzma
 SolidCompression=yes
 ArchitecturesInstallIn64BitMode=x64
