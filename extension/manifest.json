@@ -1,0 +1,19 @@
+{
+  "name": "SERP Companion: Udemy Helper",
+  "description": "Quickly send Udemy downloads to the desktop companion via Native Messaging.",
+  "version": "0.1.0",
+  "manifest_version": 3,
+  "permissions": ["nativeMessaging", "storage", "activeTab"],
+  "host_permissions": [
+    "https://*.udemy.com/*",
+    "http://127.0.0.1/*",
+    "http://localhost/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_title": "SERP Companion",
+    "default_popup": "popup.html"
+  }
+}

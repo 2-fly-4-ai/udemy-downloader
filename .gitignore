@@ -132,3 +132,21 @@ temp/
 *.exe
 # Docker Compose output volume
 output/
+
+# Coders in Flow
+.codersinflow
+node_modules
+.codex
+out
+dist
+*.vsix
+.claude
+CLAUDE.md
+.DS_Store
+.git
+*.tmp
+__pycache__
+*.pyc
+.env.local
+.next
+.github
