@@ -20,6 +20,27 @@
 Utility script to download Udemy courses, has support for DRM videos but requires the user to acquire the decryption key (for legal reasons).<br>
 Windows is the primary development OS, but I've made an effort to support Linux also (Mac untested).
 
+## Windows Maintainer Quick Build
+
+To build binaries + installer in one shot and zip it for release:
+
+```
+powershell -ExecutionPolicy Bypass -File packaging\windows\dev.ps1 -Release
+```
+
+This will:
+- Create/refresh a virtualenv and install dependencies
+- Build `bin\serp-companion.exe` and `bin\udemy-downloader.exe`
+- Compile the installer to `dist-installer\SERP-Companion-Setup.exe`
+- Zip it to `dist-installer\SERP-Companion-Setup.zip`
+
+If you prefer manual setup instead:
+
+```
+python -m venv venv && venv\Scripts\pip install -r requirements.txt pyinstaller
+packaging\windows\build.bat
+```
+
 > [!IMPORTANT]  
 > This tool will not work on encrypted courses without decryption keys being provided!
 >

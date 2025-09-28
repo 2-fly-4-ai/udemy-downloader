@@ -38,11 +38,15 @@ if errorlevel 1 (
   exit /b 1
 )
 
+REM Ensure clean build artifacts
+if exist build rd /s /q build
+if exist dist rd /s /q dist
+
 echo Building udemy-downloader.exe...
-%PYI_CMD% --noconsole --onefile --name udemy-downloader main.py || goto :error
+%PYI_CMD% --clean --noconfirm --noconsole --onefile --name udemy-downloader main.py || goto :error
 
 echo Building serp-companion.exe...
-%PYI_CMD% --noconsole --onefile --name serp-companion native_host\host.py || goto :error
+%PYI_CMD% --clean --noconfirm --noconsole --onefile --name serp-companion native_host\host.py || goto :error
 
 if not exist dist (
   echo dist folder not found
@@ -52,6 +56,10 @@ if not exist dist (
 mkdir bin 2>nul
 copy /Y dist\udemy-downloader.exe bin\udemy-downloader.exe >nul
 copy /Y dist\serp-companion.exe bin\serp-companion.exe >nul
+
+REM Verify outputs exist in bin
+if not exist bin\udemy-downloader.exe goto :error
+if not exist bin\serp-companion.exe goto :error
 
 echo Success. Binaries in bin\
 exit /b 0

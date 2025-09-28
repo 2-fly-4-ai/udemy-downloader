@@ -93,6 +93,12 @@ def handle_info(req):
         "ffmpeg": _tool_version("ffmpeg"),
         "aria2c": _tool_version("aria2c"),
         "yt_dlp": _tool_version("yt-dlp", ("--version",)),
+        # Diagnostics for where we expect binaries
+        "root": str(ROOT),
+        "bin_dir": str(BIN_DIR) if getattr(sys, 'frozen', False) else None,
+        "packaged_exe_expected": str(BIN_DL_WIN),
+        "packaged_exe_exists": BIN_DL_WIN.exists(),
+        # Legacy fields (kept for compatibility in UI)
         "main_py_exists": MAIN_PY.exists(),
         "main_py": str(MAIN_PY),
         "packaged_exe": str(BIN_DL_WIN) if BIN_DL_WIN.exists() else None,
@@ -117,13 +123,15 @@ def handle_udemy_start(req):
         _send_response(req.get("id"), False, error="missing_course_url")
         return
 
-    if not MAIN_PY.exists():
-        _send_response(req.get("id"), False, error="main_py_not_found")
-        return
+    # On Windows we require the packaged downloader exe. No Python fallback.
+    if os.name == 'nt':
+        if not BIN_DL_WIN.exists():
+            _send_response(req.get("id"), False, error=f"packaged_exe_not_found:{str(BIN_DL_WIN)}")
+            return
 
     job_id = str(uuid.uuid4())
-    # Prefer packaged downloader if available; fallback to Python script
-    if os.name == 'nt' and BIN_DL_WIN.exists():
+    # Prefer packaged downloader on Windows; keep Python path for non-Windows dev
+    if os.name == 'nt':
         args = [str(BIN_DL_WIN), "-c", course_url]
     else:
         args = [PYTHON_FOR_MAIN, "-u", str(MAIN_PY), "-c", course_url]
@@ -354,7 +362,12 @@ def run_pair_server(port=60123):
 
 
 def main():
-    _send_event("host.ready", {"root": str(ROOT)})
+    _send_event("host.ready", {
+        "root": str(ROOT),
+        "bin": str(BIN_DIR) if getattr(sys, 'frozen', False) else None,
+        "packagedExe": str(BIN_DL_WIN),
+        "packagedExeExists": BIN_DL_WIN.exists(),
+    })
     while True:
         req = _read_message()
         if req is None:
