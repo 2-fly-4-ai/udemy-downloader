@@ -8,8 +8,9 @@ Goal
 
 Build Steps (for maintainers)
 1) Build frozen binaries with PyInstaller
-   - Create venv + install deps: `python -m venv venv && venv\\Scripts\\pip install -r requirements.txt pyinstaller`
-   - Run: `packaging\\windows\\build.bat`
+   - Option A (local venv): `python -m venv venv && venv\\Scripts\\pip install -r requirements.txt pyinstaller`
+   - Option B (CI/system Python): Ensure `pip install -r requirements.txt pyinstaller` ran in the current Python
+   - Run: `packaging\\windows\\build.bat` (auto-detects venv or system Python)
    - Outputs: `bin\\serp-companion.exe`, `bin\\udemy-downloader.exe`
 
 2) Prepare tools folder
@@ -34,4 +35,3 @@ Notes
 - The host prefers the frozen `bin\\udemy-downloader.exe` if present; otherwise it falls back to Python `main.py`
 - The host prepends `{app}\\tools` to PATH, so included tools are used automatically
 - DRM keys still need to be provided by the user (`keyfile.json` in `{app}`)
-
