@@ -6,7 +6,7 @@
 #define MyAppPublisher "Your Company"
 #define MyAppExeName "serp-companion.exe"
 ; Extension ID from Chrome Web Store (stable ID). For dev, set your unpacked ID.
-#define MyExtensionId "your_extension_id_here"
+#define MyExtensionId "kjeahghmchmcjnmhmbmlfcgkhjmkcpie"
 ; Optional: Chrome Web Store slug for your extension page (improves URL). Example: "serp-companion-udemy-helper"
 #define MyExtensionSlug "your_extension_slug_here"
 
@@ -30,17 +30,23 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 Name: "desktopicon"; Description: "Create a &desktop icon"; GroupDescription: "Additional icons:"; Flags: unchecked
 
 [Files]
-; Binaries built by PyInstaller
-Source: "bin\serp-companion.exe"; DestDir: "{app}\bin"; Flags: ignoreversion
-Source: "bin\udemy-downloader.exe"; DestDir: "{app}\bin"; Flags: ignoreversion
+; Binaries built by PyInstaller (located in repo root bin\)
+Source: "..\..\bin\serp-companion.exe"; DestDir: "{app}\bin"; Flags: ignoreversion
+Source: "..\..\bin\udemy-downloader.exe"; DestDir: "{app}\bin"; Flags: ignoreversion
 
-; Bundled tools (place your files here before building the installer)
-Source: "tools\*"; DestDir: "{app}\tools"; Flags: ignoreversion recursesubdirs createallsubdirs
-; Include repo's aria2c.exe by default
-Source: "aria2c.exe"; DestDir: "{app}\tools"; Flags: ignoreversion
+; Bundled tools (located in repo root tools\) — optional wildcard
+Source: "..\..\tools\*"; DestDir: "{app}\tools"; Flags: ignoreversion recursesubdirs createallsubdirs skipifsourcedoesntexist
+; Explicit common tool binaries (included if present)
+Source: "..\..\tools\ffmpeg.exe"; DestDir: "{app}\tools"; Flags: ignoreversion skipifsourcedoesntexist
+Source: "..\..\tools\ffprobe.exe"; DestDir: "{app}\tools"; Flags: ignoreversion skipifsourcedoesntexist
+Source: "..\..\tools\shaka-packager.exe"; DestDir: "{app}\tools"; Flags: ignoreversion skipifsourcedoesntexist
+Source: "..\..\tools\yt-dlp.exe"; DestDir: "{app}\tools"; Flags: ignoreversion skipifsourcedoesntexist
+Source: "..\..\tools\aria2c.exe"; DestDir: "{app}\tools"; Flags: ignoreversion skipifsourcedoesntexist
+; Include repo's aria2c.exe by default (root) as final fallback
+Source: "..\..\aria2c.exe"; DestDir: "{app}\tools"; Flags: ignoreversion skipifsourcedoesntexist
 
-; Optional: default keyfile placeholder
-Source: "keyfile.json"; DestDir: "{app}"; Flags: onlyifdoesntexist
+; Optional: default keyfile placeholder (root)
+Source: "..\..\keyfile.json"; DestDir: "{app}"; Flags: onlyifdoesntexist skipifsourcedoesntexist
 
 [Icons]
 Name: "{group}\SERP Companion"; Filename: "{app}\bin\{#MyAppExeName}"
@@ -73,18 +79,17 @@ procedure CurStepChanged(CurStep: TSetupStep);
 var
   ManifestPath: String;
   Manifest: String;
-  F: Integer;
+  Wrote: Boolean;
 begin
   if CurStep = ssPostInstall then
   begin
     ManifestPath := ExpandConstant('{app}') + '\\com.serp.companion.json';
     Manifest := GenerateManifest(ExpandConstant('{app}'));
     if FileExists(ManifestPath) then DeleteFile(ManifestPath);
-    F := FileCreate(ManifestPath);
-    if F <> -1 then
+    Wrote := SaveStringToFile(ManifestPath, Manifest, False);
+    if not Wrote then
     begin
-      FileWrite(F, Manifest[1], Length(Manifest));
-      FileClose(F);
+      Log('Failed to write manifest: ' + ManifestPath);
     end;
   end;
 end;
