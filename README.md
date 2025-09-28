@@ -232,3 +232,56 @@ All code is licensed under the MIT license
 Woo, you made it this far!
 
 I spend a lot of time coding things, and almost all of them are for nothing in return. When theres a lot of use of a program I make, I try to keep it updated, fix bugs, and even implement new features! But after a while, I do run out of motivation to keep doing it. If you like my work, and can help me out even a little, it would really help me out. If you are interested, you can find all the available options [here](https://github.com/Puyodead1/#supporting-me). Even if you don't, thank you anyways!
+
+---
+
+## Desktop Companion + Chrome Extension
+
+This repo now includes a Desktop Companion (Chrome Native Messaging host) and a minimal Chrome extension so users can trigger downloads from the browser and let the native app do the heavy lifting (ffmpeg/aria2c/yt‑dlp/shaka‑packager).
+
+See quick usage in `COMPANION-QUICKSTART.md`:1.
+
+### Why There Are Two EXEs In `bin/`
+
+- `bin/serp-companion.exe`:1
+  - The Native Messaging host ("Desktop Companion"). It communicates with the Chrome extension over stdio and exposes simple JSON commands (ping/info/start/cancel). It can also run a local pairing server to auto‑register the extension.
+- `bin/udemy-downloader.exe`:1
+  - A frozen build of this downloader (the same as running `python main.py`). The companion prefers to call this EXE so end users don’t need Python/pip. If missing, the companion falls back to `main.py` with your system/venv Python.
+
+### Build The Binaries (Local)
+
+- Create virtualenv and install build deps:
+  - Windows: `python -m venv venv && venv\Scripts\pip install -r requirements.txt pyinstaller`
+- Build both EXEs with PyInstaller:
+  - Run `packaging\windows\build.bat`:1
+  - Outputs: `bin\serp-companion.exe`:1 and `bin\udemy-downloader.exe`:1
+- Bundle native tools (optional, recommended):
+  - Drop `ffmpeg.exe`, `yt-dlp.exe`, `shaka-packager.exe` into `tools\` at repo root. The companion prepends this folder to PATH so users don’t need to install them.
+
+### Build The One‑Click Installer (Local)
+
+- Install Inno Setup (Windows): https://jrsoftware.org/
+- Edit installer settings: `packaging\windows\installer.iss`:1
+  - The installer starts the companion with `--pair-server` after install and opens your extension page.
+- Compile the installer in Inno Setup; output appears under `dist-installer\SERP-Companion-Setup.exe`.
+
+### Build In CI (GitHub Actions)
+
+- Build EXEs only: `.github/workflows/build-windows.yml`:1
+  - Produces `bin\serp-companion.exe` and `bin\udemy-downloader.exe` artifacts.
+- Build the installer: `.github/workflows/build-installer-windows.yml`:1
+  - Installs Inno Setup on the runner, compiles `packaging\windows\installer.iss`:1, and uploads `SERP-Companion-Setup.exe` as an artifact.
+
+### Pairing And First‑Run
+
+- The companion can run a quick pairing server: `serp-companion.exe --pair-server` (installer does this automatically post‑install).
+- The extension popup has “Pair Desktop” which calls the local server to register the extension ID:
+  - See `extension/popup.js`:1
+- After pairing: “Ping” and “Info” should succeed; “Start” will run downloads. Output defaults to `~/Videos/Udemy` (fallback `~/Downloads/Udemy`).
+
+### Key Files
+
+- Companion host: `native_host/host.py`:1
+- Installer script: `packaging/windows/installer.iss`:1
+- Local build script: `packaging/windows/build.bat`:1
+- Quickstart: `COMPANION-QUICKSTART.md`:1

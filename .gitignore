@@ -152,3 +152,4 @@ __pycache__
 # Allow GitHub Actions workflows
 !.github/
 !.github/workflows/
+.github
