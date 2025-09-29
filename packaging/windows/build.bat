@@ -45,7 +45,8 @@ if exist dist rd /s /q dist
 echo Building udemy-downloader.exe (console-enabled for log piping)...
 REM Build as console app so stdout/stderr can be piped by the host.
 REM The host starts it with CREATE_NO_WINDOW so no window pops up.
-%PYI_CMD% --clean --noconfirm --onefile --name udemy-downloader main.py || goto :error
+REM Include demoji data files so emoji stripping works in frozen builds.
+%PYI_CMD% --clean --noconfirm --onefile --name udemy-downloader --collect-data demoji main.py || goto :error
 
 echo Building serp-companion.exe...
 %PYI_CMD% --clean --noconfirm --noconsole --onefile --name serp-companion native_host\host.py || goto :error

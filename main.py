@@ -12,6 +12,7 @@ from http.cookiejar import MozillaCookieJar
 from pathlib import Path
 from urllib.parse import urlparse
 from typing import IO, Union
+import shutil
 
 import browser_cookie3
 import demoji
@@ -67,15 +68,54 @@ cookies_first = False
 
 
 def deEmojify(inputStr: str):
-    return demoji.replace(inputStr, "")
+    """Remove emoji from strings.
+
+    Primary path uses demoji (accurate), but PyInstaller builds may miss
+    demoji resource files (codes.json). Fall back to a regex that strips
+    common emoji ranges so we don't crash on packaged builds.
+    """
+    try:
+        return demoji.replace(inputStr, "")
+    except Exception:
+        try:
+            # Fallback regex that covers common emoji blocks
+            # Ref ranges: Emoticons, Misc Symbols & Pictographs, Transport & Map,
+            # Flags, Dingbats, Enclosed characters, Supplemental Symbols, etc.
+            emoji_re = re.compile(
+                "[\U0001F600-\U0001F64F"  # Emoticons
+                "\U0001F300-\U0001F5FF"  # Misc Symbols & Pictographs
+                "\U0001F680-\U0001F6FF"  # Transport & Map
+                "\U0001F1E0-\U0001F1FF"  # Flags
+                "\U00002702-\U000027B0"  # Dingbats
+                "\U000024C2-\U0001F251"  # Enclosed chars
+                "\U0001F900-\U0001F9FF"  # Supplemental Symbols & Pictographs
+                "\U0001FA70-\U0001FAFF"  # Symbols & Pictographs Extended-A
+                "\U00002600-\U000026FF"  # Misc Symbols
+                "\U0001F700-\U0001F77F"  # Alchemical Symbols
+                "]+",
+                flags=re.UNICODE,
+            )
+            return emoji_re.sub("", inputStr)
+        except Exception:
+            # Last resort: return original string unchanged
+            return inputStr
 
 
 # from https://stackoverflow.com/a/21978778/9785713
-def log_subprocess_output(prefix: str, pipe: IO[bytes]):
-    if pipe:
-        for line in iter(lambda: pipe.read(1), ""):
-            logger.debug("[%s]: %r", prefix, line.decode("utf8").strip())
-        pipe.flush()
+def log_subprocess_output(prefix: str, pipe: IO[str]):
+    """Stream subprocess output to the logger as DEBUG lines."""
+    if not pipe:
+        return
+    try:
+        for line in iter(pipe.readline, ""):
+            if not line:
+                break
+            logger.debug("[%s] %s", prefix, line.rstrip())
+    finally:
+        try:
+            pipe.close()
+        except Exception:
+            pass
 
 
 def parse_chapter_filter(chapter_str: str):
@@ -396,6 +436,30 @@ def pre_run():
     logger.addHandler(file_handler)
 
     logger.info(f"Output directory set to {DOWNLOAD_DIR}")
+
+    # Log helper tool resolution to aid troubleshooting
+    for tool in ("yt-dlp", "aria2c", "ffmpeg", "shaka-packager"):
+        resolved = shutil.which(tool)
+        if resolved:
+            logger.debug("Tool lookup: %s -> %s", tool, resolved)
+        else:
+            logger.debug("Tool lookup: %s -> NOT FOUND in PATH", tool)
+
+    try:
+        # When frozen: exe lives under {app}\bin\udemy-downloader.exe, tools are under {app}\tools
+        if getattr(sys, "frozen", False):
+            app_root = Path(sys.executable).resolve().parent.parent  # {app}
+        else:
+            # In dev: repo root
+            app_root = Path(MAIN_SCRIPT_PATH).resolve().parent
+        tools_dir = app_root / "tools"
+        if tools_dir.exists():
+            tool_files = sorted(p.name for p in tools_dir.iterdir())
+            logger.debug("Tools directory (%s) contains: %s", tools_dir, ", ".join(tool_files))
+        else:
+            logger.debug("Tools directory not found at %s", tools_dir)
+    except Exception:
+        logger.exception("Failed to enumerate tools directory")
 
     Path(DOWNLOAD_DIR).mkdir(parents=True, exist_ok=True)
     Path(SAVED_DIR).mkdir(parents=True, exist_ok=True)
@@ -842,6 +906,10 @@ class Udemy:
 
         # get temp folder
         temp_path = Path(Path.cwd(), "temp")
+        try:
+            logger.debug("> temp dir selected: %s", temp_path)
+        except Exception:
+            pass
 
         # ensure the folder exists
         temp_path.mkdir(parents=True, exist_ok=True)
@@ -852,6 +920,7 @@ class Udemy:
         m3u8_path = Path(temp_path, f"index_{asset_id}.m3u8")
 
         try:
+            logger.debug("> m3u8: fetching master playlist %s", url)
             r = self.session._get(url)
             r.raise_for_status()
             raw_data = r.text
@@ -880,6 +949,7 @@ class Udemy:
                 playlist_path = Path(temp_path, f"index_{asset_id}_{width}x{height}.m3u8")
 
                 with open(playlist_path, "w") as f:
+                    logger.debug("> m3u8: fetching variant playlist %s", pl.uri)
                     r = self.session._get(pl.uri)
                     r.raise_for_status()
                     f.write(r.text)
@@ -895,7 +965,7 @@ class Udemy:
                     }
                 )
         except Exception as error:
-            logger.error(f"Udemy Says : '{error}' while fetching hls streams..")
+            logger.exception(f"m3u8 error: '{error}' while fetching hls streams")
         return _temp
 
     def _extract_mpd(self, url):
@@ -905,6 +975,10 @@ class Udemy:
 
         # get temp folder
         temp_path = Path(Path.cwd(), "temp")
+        try:
+            logger.debug("> temp dir selected: %s", temp_path)
+        except Exception:
+            pass
 
         # ensure the folder exists
         temp_path.mkdir(parents=True, exist_ok=True)
@@ -917,6 +991,7 @@ class Udemy:
 
         try:
             with open(mpd_path, "wb") as f:
+                logger.debug("> mpd: fetching manifest %s", url)
                 r = self.session._get(url)
                 r.raise_for_status()
                 f.write(r.content)
@@ -973,7 +1048,7 @@ class Udemy:
             _temp = _temp2
         except Exception:
             logger.exception(f"Error fetching MPD streams")
-
+        
         # We don't delete the mpd file yet because we can use it to download later
         return _temp
 
@@ -1320,7 +1395,12 @@ class Session(object):
         except Exception:
             host = None
         for i in range(10):
-            req = self._session.get(url, params=params)
+            try:
+                req = self._session.get(url, params=params, timeout=20)
+            except Exception as e:
+                logger.error("Request exception %s on %s (attempt %d)", e.__class__.__name__, url, i)
+                time.sleep(0.8)
+                continue
             if req.ok or req.status_code in [502, 503]:
                 return req
             if not req.ok:
@@ -1438,9 +1518,16 @@ def mux_process(
         else:
             command = f'nice -n 7 ffmpeg -y {video_decryption_arg} -i "{video_filepath}" {audio_decryption_arg} -i "{audio_filepath}" -c copy -fflags +bitexact -shortest -map_metadata -1 -metadata title="{video_title}" -metadata comment="Downloaded with Udemy-Downloader by Puyodead1 (https://github.com/Puyodead1/udemy-downloader)" "{output_path}"'
 
-    process = subprocess.Popen(command, shell=True)
-    log_subprocess_output("FFMPEG-STDOUT", process.stdout)
-    log_subprocess_output("FFMPEG-STDERR", process.stderr)
+    process = subprocess.Popen(
+        command,
+        shell=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        bufsize=1,
+        encoding="utf-8",
+    )
+    log_subprocess_output("FFMPEG", process.stdout)
     ret_code = process.wait()
     if ret_code != 0:
         raise Exception("Muxing returned a non-zero exit code")
@@ -1476,9 +1563,15 @@ def handle_segments(url, format_id, lecture_id, video_title, output_path, chapte
         format_id,
         f"{url}",
     ]
-    process = subprocess.Popen(args)
-    log_subprocess_output("YTDLP-STDOUT", process.stdout)
-    log_subprocess_output("YTDLP-STDERR", process.stderr)
+    process = subprocess.Popen(
+        args,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        bufsize=1,
+        encoding="utf-8",
+    )
+    log_subprocess_output("YTDLP", process.stdout)
     ret_code = process.wait()
     logger.info("> Lecture Tracks Downloaded")
 
@@ -1538,7 +1631,7 @@ def handle_segments(url, format_id, lecture_id, video_title, output_path, chapte
         #     return
         # logger.info("> Decryption complete")
         logger.info("> Merging video and audio, this might take a minute...")
-        mux_process(
+        mux_ret = mux_process(
             video_filepath_enc,
             audio_filepath_enc,
             video_title,
@@ -1546,7 +1639,7 @@ def handle_segments(url, format_id, lecture_id, video_title, output_path, chapte
             audio_key,
             video_key,
         )
-        if ret_code != 0:
+        if mux_ret != 0:
             logger.error("> Return code from ffmpeg was non-0 (error), skipping!")
             return
         logger.info("> Merging complete, renaming final file...")
@@ -1685,9 +1778,15 @@ def download_aria(url, file_dir, filename):
         "--disable-ipv6",
         "--follow-torrent=false",
     ]
-    process = subprocess.Popen(args)
-    log_subprocess_output("ARIA2-STDOUT", process.stdout)
-    log_subprocess_output("ARIA2-STDERR", process.stderr)
+    process = subprocess.Popen(
+        args,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        bufsize=1,
+        encoding="utf-8",
+    )
+    log_subprocess_output("ARIA2", process.stdout)
     ret_code = process.wait()
     if ret_code != 0:
         raise Exception("Return code from the downloader was non-0 (error)")
@@ -1789,9 +1888,15 @@ def process_lecture(lecture, lecture_path, chapter_dir):
                             f"{temp_filepath}",
                             f"{url}",
                         ]
-                        process = subprocess.Popen(cmd)
-                        log_subprocess_output("YTDLP-STDOUT", process.stdout)
-                        log_subprocess_output("YTDLP-STDERR", process.stderr)
+                        process = subprocess.Popen(
+                            cmd,
+                            stdout=subprocess.PIPE,
+                            stderr=subprocess.STDOUT,
+                            text=True,
+                            bufsize=1,
+                            encoding="utf-8",
+                        )
+                        log_subprocess_output("YTDLP", process.stdout)
                         ret_code = process.wait()
                         if ret_code == 0:
                             tmp_file_path = lecture_path + ".tmp"
@@ -1815,9 +1920,15 @@ def process_lecture(lecture, lecture_path, chapter_dir):
                                     'comment="Downloaded with Udemy-Downloader by Puyodead1 (https://github.com/Puyodead1/udemy-downloader)"',
                                     tmp_file_path,
                                 ]
-                                process = subprocess.Popen(cmd)
-                                log_subprocess_output("FFMPEG-STDOUT", process.stdout)
-                                log_subprocess_output("FFMPEG-STDERR", process.stderr)
+                                process = subprocess.Popen(
+                                    cmd,
+                                    stdout=subprocess.PIPE,
+                                    stderr=subprocess.STDOUT,
+                                    text=True,
+                                    bufsize=1,
+                                    encoding="utf-8",
+                                )
+                                log_subprocess_output("FFMPEG", process.stdout)
                                 ret_code = process.wait()
                                 if ret_code == 0:
                                     os.unlink(lecture_path)
@@ -1921,6 +2032,10 @@ def parse_new(udemy: Udemy, udemy_object: dict):
 
         for lecture in chapter.get("lectures"):
             clazz = lecture.get("_class")
+            lecture_title = lecture.get("lecture_title")
+            logger.debug(
+                "  > Lecture record: class=%s title=%s skip_lectures=%s", clazz, lecture_title, skip_lectures
+            )
 
             if clazz == "quiz":
                 # skip the quiz if we dont want to download it
@@ -1932,41 +2047,67 @@ def parse_new(udemy: Udemy, udemy_object: dict):
             index = lecture.get("index")  # this is lecture_counter
             # lecture_index = lecture.get("lecture_index")  # this is the raw object index from udemy
 
-            lecture_title = lecture.get("lecture_title")
+            logger.debug("    calling _parse_lecture for '%s'", lecture_title)
             parsed_lecture = udemy._parse_lecture(lecture)
+            logger.debug("    returned from _parse_lecture for '%s'", lecture_title)
+            logger.debug(
+                "    parsed lecture fields: encrypted=%s extension=%s sources=%s video_sources=%s", 
+                parsed_lecture.get("is_encrypted"),
+                parsed_lecture.get("extension"),
+                len(parsed_lecture.get("sources") or []),
+                len(parsed_lecture.get("video_sources") or []),
+            )
 
-            lecture_extension = parsed_lecture.get("extension")
-            extension = "mp4"  # video lectures dont have an extension property, so we assume its mp4
-            if lecture_extension != None:
-                # if the lecture extension property isnt none, set the extension to the lecture extension
-                extension = lecture_extension
-            lecture_file_name = sanitize_filename(lecture_title + "." + extension)
-            lecture_file_name = deEmojify(lecture_file_name)
-            lecture_path = os.path.join(chapter_dir, lecture_file_name)
+            try:
+                lecture_extension = parsed_lecture.get("extension")
+                extension = "mp4"  # video lectures dont have an extension property, so we assume its mp4
+                if lecture_extension != None:
+                    # if the lecture extension property isnt none, set the extension to the lecture extension
+                    extension = lecture_extension
+                lecture_file_name = sanitize_filename(lecture_title + "." + extension)
+                lecture_file_name = deEmojify(lecture_file_name)
+                lecture_path = os.path.join(chapter_dir, lecture_file_name)
 
-            if not skip_lectures:
-                logger.info(f"  > Processing lecture {index} of {total_lectures}")
+                if not skip_lectures:
+                    logger.info(f"  > Processing lecture {index} of {total_lectures}")
+                    logger.debug(
+                        "      > extension=%s path=%s subtitles=%s assets=%s",
+                        extension,
+                        lecture_path,
+                        len(parsed_lecture.get("subtitles") or []),
+                        len(parsed_lecture.get("assets") or []),
+                    )
 
-                # Check if the lecture is already downloaded
-                if os.path.isfile(lecture_path):
-                    logger.info("      > Lecture '%s' is already downloaded, skipping..." % lecture_title)
-                else:
-                    # Check if the file is an html file
-                    if extension == "html":
-                        # if the html content is None or an empty string, skip it so we dont save empty html files
-                        if parsed_lecture.get("html_content") != None and parsed_lecture.get("html_content") != "":
-                            html_content = parsed_lecture.get("html_content").encode("utf8", "ignore").decode("utf8")
-                            lecture_path = os.path.join(
-                                chapter_dir,
-                                "{}.html".format(sanitize_filename(lecture_title)),
-                            )
-                            try:
-                                with open(lecture_path, encoding="utf8", mode="w") as f:
-                                    f.write(html_content)
-                            except Exception:
-                                logger.exception("    > Failed to write html file")
+                    # Check if the lecture is already downloaded
+                    if os.path.isfile(lecture_path):
+                        logger.info("      > Lecture '%s' is already downloaded, skipping..." % lecture_title)
                     else:
-                        process_lecture(parsed_lecture, lecture_path, chapter_dir)
+                        # Check if the file is an html file
+                        if extension == "html":
+                            # if the html content is None or an empty string, skip it so we dont save empty html files
+                            if parsed_lecture.get("html_content") != None and parsed_lecture.get("html_content") != "":
+                                html_content = parsed_lecture.get("html_content").encode("utf8", "ignore").decode("utf8")
+                                lecture_path = os.path.join(
+                                    chapter_dir,
+                                    "{}.html".format(sanitize_filename(lecture_title)),
+                                )
+                                try:
+                                    logger.debug("      > Writing HTML lecture to %s", lecture_path)
+                                    with open(lecture_path, encoding="utf8", mode="w") as f:
+                                        f.write(html_content)
+                                except Exception:
+                                    logger.exception("    > Failed to write html file")
+                        else:
+                            try:
+                                logger.debug("      > Invoking process_lecture for '%s'", lecture_title)
+                                process_lecture(parsed_lecture, lecture_path, chapter_dir)
+                                logger.debug("      > process_lecture returned for '%s'", lecture_title)
+                            except Exception:
+                                logger.exception(
+                                    "      > Unexpected error while processing lecture '%s'", lecture_title
+                                )
+            except Exception:
+                logger.exception("    > Unexpected error building lecture path/metadata for '%s'", lecture_title)
 
             # download subtitles for this lecture
             subtitles = parsed_lecture.get("subtitles")
