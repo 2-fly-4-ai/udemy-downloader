@@ -177,7 +177,8 @@ def handle_udemy_start(req):
     if payload.get("concurrentDownloads"):
         args += ["-cd", str(int(payload.get("concurrentDownloads")))]
 
-    log_level = payload.get("logLevel", "INFO")
+    # Default to DEBUG to aid troubleshooting unless UI payload overrides
+    log_level = payload.get("logLevel", "DEBUG")
     args += ["--log-level", log_level]
 
     creationflags = 0
@@ -351,10 +352,37 @@ class PairHandler(BaseHTTPRequestHandler):
         self.end_headers()
 
 
-def run_pair_server(port=60123):
-    addr = ('127.0.0.1', port)
-    httpd = HTTPServer(addr, PairHandler)
-    _send_event("host.pair_server", {"addr": f"http://{addr[0]}:{addr[1]}"})
+def _try_bind_pair_server(ports):
+    for p in ports:
+        try:
+            httpd = HTTPServer(("127.0.0.1", p), PairHandler)
+            return httpd, p
+        except PermissionError as e:
+            _send_event("host.pair_server_error", {"port": p, "error": f"permission:{e}"})
+        except OSError as e:
+            # e.g., EADDRINUSE or other bind errors
+            _send_event("host.pair_server_error", {"port": p, "error": f"oserror:{e}"})
+    return None, None
+
+
+def run_pair_server(port=None):
+    # Candidates in case the default is excluded/reserved on the system
+    candidates = []
+    if port:
+        try:
+            candidates = [int(port)]
+        except Exception:
+            candidates = []
+    if not candidates:
+        candidates = [60123, 53123, 54123, 55123, 56123, 47123, 42123, 23123]
+
+    httpd, bound = _try_bind_pair_server(candidates)
+    if not httpd:
+        # Couldn't bind any candidate; exit gracefully without crashing the host
+        _send_event("host.pair_server_failed", {"candidates": candidates})
+        return
+
+    _send_event("host.pair_server", {"addr": f"http://127.0.0.1:{bound}"})
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:
@@ -381,7 +409,27 @@ def main():
 
 
 if __name__ == '__main__':
-    if len(sys.argv) > 1 and sys.argv[1] in ('--pair-server', 'pair', 'pair-server'):
-        run_pair_server()
+    if len(sys.argv) > 1 and (sys.argv[1] in ('--pair-server', 'pair', 'pair-server') or sys.argv[1].startswith('--pair-server=')):
+        # Allow optional explicit port via CLI or environment
+        sel_port = None
+        for i, arg in enumerate(sys.argv[1:], start=1):
+            if arg.startswith('--pair-server='):
+                try:
+                    sel_port = int(arg.split('=', 1)[1])
+                except Exception:
+                    sel_port = None
+            if arg in ('--pair-port', '--port') and i + 1 < len(sys.argv):
+                try:
+                    sel_port = int(sys.argv[i + 1])
+                except Exception:
+                    sel_port = None
+        if sel_port is None:
+            try:
+                env_p = os.getenv('COMPANION_PAIR_PORT')
+                if env_p:
+                    sel_port = int(env_p)
+            except Exception:
+                sel_port = None
+        run_pair_server(port=sel_port)
     else:
         main()

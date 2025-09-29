@@ -94,39 +94,40 @@ $('cancel').addEventListener('click', () => {
 $('clear').addEventListener('click', () => { logEl.textContent = ''; });
 
 // Pairing: automatically register this extension ID in the native host
-$('pair').addEventListener('click', async () => {
-  try {
-    const id = chrome.runtime.id;
-    const url = `http://127.0.0.1:60123/pair?extId=${id}`;
-    const res = await fetch(url);
-    const json = await res.json();
-    if (json.ok) {
-      log(`[pair] ok: manifest=${json.manifest}`);
-    } else {
-      log(`[pair] err: ${json.error}`);
-    }
-  } catch (e) {
-    log(`[pair] failed: ${e}`);
+const PAIR_PORTS = [60123, 53123, 54123, 55123, 56123, 47123, 42123, 23123];
+
+async function tryPair(extId) {
+  for (const p of PAIR_PORTS) {
+    try {
+      const res = await fetch(`http://127.0.0.1:${p}/pair?extId=${extId}`);
+      if (res.ok) {
+        const json = await res.json();
+        if (json && json.ok) {
+          log(`[pair] ok on :${p} manifest=${json.manifest}`);
+          return true;
+        }
+      }
+    } catch (_) { /* try next */ }
   }
+  return false;
+}
+
+$('pair').addEventListener('click', async () => {
+  const id = chrome.runtime.id;
+  const ok = await tryPair(id);
+  if (!ok) log('[pair] no pair server found on candidate ports');
 });
 
 // Attempt auto-pair on popup open (no-op if server not running)
 document.addEventListener('DOMContentLoaded', async () => {
+  // Load last used output directory
   try {
-    // Load last used output directory
-    try {
-      const saved = await chrome.storage?.local?.get?.('outDir');
-      if (saved && saved.outDir && $('outDir')) $('outDir').value = saved.outDir;
-    } catch (_) {}
-
+    const saved = await chrome.storage?.local?.get?.('outDir');
+    if (saved && saved.outDir && $('outDir')) $('outDir').value = saved.outDir;
+  } catch (_) {}
+  // Attempt auto-pair across candidate ports (no-op if server not running)
+  try {
     const id = chrome.runtime.id;
-    const url = `http://127.0.0.1:60123/pair?extId=${id}`;
-    const res = await fetch(url);
-    if (res.ok) {
-      const json = await res.json();
-      if (json && json.ok) log(`[pair] ok: manifest=${json.manifest}`);
-    }
-  } catch (_) {
-    // ignore; server may not be running yet
-  }
+    await tryPair(id);
+  } catch (_) { /* ignore */ }
 });

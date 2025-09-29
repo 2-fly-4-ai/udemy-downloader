@@ -10,6 +10,7 @@ import sys
 import time
 from http.cookiejar import MozillaCookieJar
 from pathlib import Path
+from urllib.parse import urlparse
 from typing import IO, Union
 
 import browser_cookie3
@@ -96,6 +97,18 @@ def parse_chapter_filter(chapter_str: str):
             except ValueError:
                 logger.error("Invalid chapter number in --chapter argument: %s", part)
     return chapters
+
+
+def _mask(val: str, keep_start: int = 6, keep_end: int = 4) -> str:
+    try:
+        if not val:
+            return "(none)"
+        s = str(val)
+        if len(s) <= keep_start + keep_end + 3:
+            return s[0:1] + "*" * max(0, len(s) - 2) + s[-1:]
+        return f"{s[:keep_start]}...{s[-keep_end:]}"
+    except Exception:
+        return "(masked)"
 
 
 # this is the first function that is called, we parse the arguments, setup the logger, and ensure that required directories exist
@@ -411,24 +424,47 @@ class Udemy:
 
             self.session = self.auth._session
 
-            if browser == "chrome":
-                cj = browser_cookie3.chrome()
-            elif browser == "firefox":
-                cj = browser_cookie3.firefox()
-            elif browser == "opera":
-                cj = browser_cookie3.opera()
-            elif browser == "edge":
-                cj = browser_cookie3.edge()
-            elif browser == "brave":
-                cj = browser_cookie3.brave()
-            elif browser == "chromium":
-                cj = browser_cookie3.chromium()
-            elif browser == "vivaldi":
-                cj = browser_cookie3.vivaldi()
-            elif browser == "file":
-                # load netscape cookies from file
-                cj = MozillaCookieJar("cookies.txt")
-                cj.load()
+            logger.info("> Loading cookies from browser mode: %s", browser)
+            try:
+                if browser == "chrome":
+                    cj = browser_cookie3.chrome()
+                elif browser == "firefox":
+                    cj = browser_cookie3.firefox()
+                elif browser == "opera":
+                    cj = browser_cookie3.opera()
+                elif browser == "edge":
+                    cj = browser_cookie3.edge()
+                elif browser == "brave":
+                    cj = browser_cookie3.brave()
+                elif browser == "chromium":
+                    cj = browser_cookie3.chromium()
+                elif browser == "vivaldi":
+                    cj = browser_cookie3.vivaldi()
+                elif browser == "file":
+                    # load netscape cookies from file
+                    cj = MozillaCookieJar("cookies.txt")
+                    cj.load()
+                else:
+                    raise ValueError(f"Unsupported browser: {browser}")
+            except Exception as e:
+                logger.exception("Failed to load cookies from %s: %s", browser, e)
+                sys.exit(1)
+
+            try:
+                _cookies_list = list(cj) if cj is not None else []
+                udemy_cookies = [c for c in _cookies_list if (c.domain.endswith("udemy.com") or c.domain == ".udemy.com")]
+                logger.debug(
+                    "> Cookies loaded: total=%d udemy=%d domains=%s",
+                    len(_cookies_list),
+                    len(udemy_cookies),
+                    sorted({c.domain for c in udemy_cookies})
+                )
+                logger.debug(
+                    "> Udemy cookie names: %s",
+                    ", ".join(sorted({c.name for c in udemy_cookies})) or "(none)"
+                )
+            except Exception:
+                pass
 
             # Adjust headers for web cookie-based API calls
             try:
@@ -480,7 +516,7 @@ class Udemy:
                         }
                     )
                     try:
-                        logger.info("> Attached bearer from cookies")
+                        logger.info("> Attached bearer from cookies (auth=%s)", _mask(access_token))
                     except Exception:
                         pass
 
@@ -489,6 +525,7 @@ class Udemy:
                     for c in cj:
                         if c.name == "csrftoken" and (c.domain.endswith("udemy.com") or c.domain == ".udemy.com"):
                             h["X-CSRFToken"] = c.value
+                            logger.debug("> Attached CSRF token from cookies (csrftoken=%s)", _mask(c.value))
                             break
                 except Exception:
                     pass
@@ -1242,6 +1279,11 @@ class Session(object):
     #     self._headers["X-Udemy-Authorization"] = "Bearer {}".format(bearer_token)
 
     def _get(self, url, params=None):
+        host = None
+        try:
+            host = urlparse(url).hostname
+        except Exception:
+            host = None
         for i in range(10):
             req = self._session.get(url, cookies=cj, params=params)
             if req.ok or req.status_code in [502, 503]:
@@ -1249,6 +1291,30 @@ class Session(object):
             if not req.ok:
                 logger.error("Failed request " + url)
                 logger.error(f"{req.status_code} {req.reason}, retrying (attempt {i} )...")
+                try:
+                    # Brief diagnostics for auth/cookies
+                    h = self._session.headers or {}
+                    auth = h.get("authorization") or h.get("Authorization")
+                    csrf = h.get("X-CSRFToken")
+                    ua = h.get("User-Agent")
+                    # Count cookies for the request host
+                    _cookies_list = list(cj) if cj is not None else []
+                    host_cookies = [c for c in _cookies_list if (host and c.domain and (c.domain == host or host.endswith(c.domain.lstrip('.'))))]
+                    logger.debug(
+                        "> Request debug: host=%s ua=%s auth_present=%s csrf_present=%s host_cookie_count=%d host_cookie_names=%s",
+                        host,
+                        ua,
+                        bool(auth),
+                        bool(csrf),
+                        len(host_cookies),
+                        ", ".join(sorted({c.name for c in host_cookies}))
+                    )
+                    if auth:
+                        logger.debug("> Authorization: %s", _mask(auth))
+                    if csrf:
+                        logger.debug("> X-CSRFToken: %s", _mask(csrf))
+                except Exception:
+                    pass
                 time.sleep(0.8)
 
     def _post(self, url, data, redirect=True):

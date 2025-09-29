@@ -30,3 +30,4 @@ Notes
 - DRM content requires `keyfile.json` in install directory (or repo root in dev mode)
 - Downloads default to `~/Videos/Udemy` (falls back to `~/Downloads/Udemy`)
 - Popup now has “Cancel” and “Info” buttons; Info shows tool versions and paths
+- Pair server binds on 127.0.0.1 using candidate ports [60123, 53123, 54123, 55123, 56123, 47123, 42123, 23123]. If 60123 is reserved/excluded on your system (common with Hyper‑V/WSL), the server falls back automatically and the popup tries all candidates when you click “Pair”.
