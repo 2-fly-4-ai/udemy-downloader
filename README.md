@@ -82,13 +82,14 @@ You will need to get a few things before you can use this program:
 
 ## Authentication
 
-By default, when launched from the Desktop Companion, the downloader uses your browser cookies (Chrome) automatically. This is the recommended method and works for both individually purchased and subscription courses.
+By default, when launched from the Desktop Companion, the downloader uses your browser cookies (Chrome) automatically. This is the recommended method and works for both individually purchased and subscription courses. The Chrome extension can also extract cookies and pass them as a `cookies.txt` to the downloader.
 
 Options:
 
 -   Use browser cookies (recommended):
     -   Ensure you are logged into Udemy in your browser.
     -   Run with `--browser chrome` (or `firefox`, `edge`, `brave`, `chromium`, `vivaldi`). The companion already passes `--browser chrome` for you.
+    -   In the Desktop Companion popup, you can enable “Use cookies (extract…)” to generate a `cookies.txt` and prefer that automatically.
 -   Use a cookies.txt file (advanced/portable):
     -   Export cookies for `udemy.com` using a “cookies.txt” exporter (e.g., “Get cookies.txt LOCALLY”).
     -   Save the file as `cookies.txt` in the current working directory.
@@ -96,6 +97,7 @@ Options:
     -   Run with `--browser file`.
 -   Use Bearer token (alternative):
     -   Set via CLI `-b <token>` or set env var `UDEMY_BEARER`.
+    -   In the Desktop Companion popup, you may paste a bearer token; the host will first try cookies and, if the run fails, automatically retry with the bearer.
 
 ## Acquire Bearer Token
 
@@ -124,6 +126,9 @@ To access courses (especially subscription content), cookies are preferred. The 
 Supported values for `--browser` in this build: `chrome`, `firefox`, `edge`, `brave`, `chromium`, `vivaldi`, `opera`, `file`.
 
 Tip: The Desktop Companion uses `--browser chrome` by default, so you usually don’t need to configure anything — just ensure you’re logged into Udemy in Chrome.
+
+Extra:
+- Prefer cookies over bearer env var: add `--cookies-first` (env `UDEMY_BEARER` is ignored unless `-b` is provided).
 
 ## Ready to go
 

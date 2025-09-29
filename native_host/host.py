@@ -67,6 +67,7 @@ else:
 MAIN_PY = ROOT / 'main.py'
 BIN_DL_WIN = ROOT / 'bin' / 'udemy-downloader.exe'
 TOOLS_DIR = ROOT / 'tools'
+COOKIES_PATH = ROOT / 'cookies.txt'
 VENV_PY_WIN = ROOT / 'venv' / 'Scripts' / 'python.exe'
 VENV_PY_NIX = ROOT / 'venv' / 'bin' / 'python'
 PYTHON_FOR_MAIN = str(VENV_PY_WIN if VENV_PY_WIN.exists() else (VENV_PY_NIX if VENV_PY_NIX.exists() else sys.executable))
@@ -136,10 +137,26 @@ def handle_udemy_start(req):
     else:
         args = [PYTHON_FOR_MAIN, "-u", str(MAIN_PY), "-c", course_url]
 
-    # Use local Chrome cookies by default for auth if bearer not provided
-    use_browser = payload.get("browser", "chrome")
+    # If cookies were provided inline, write them to cookies.txt and prefer file cookies
+    cookies_txt = payload.get("cookiesTxt")
+    wrote_cookies = False
+    if isinstance(cookies_txt, str) and len(cookies_txt) > 0:
+        try:
+            COOKIES_PATH.write_text(cookies_txt, encoding='utf-8')
+            wrote_cookies = True
+            _send_event("host.cookies_saved", {"path": str(COOKIES_PATH), "bytes": len(cookies_txt)})
+        except Exception as e:
+            _send_event("host.cookies_save_failed", {"error": str(e)})
+
+    # Determine browser mode. Default to chrome if no cookies were passed in.
+    use_browser = payload.get("browser")
+    if not use_browser:
+        use_browser = "file" if wrote_cookies else "chrome"
     if use_browser:
         args += ["--browser", use_browser]
+    prefer_cookies = bool(payload.get("preferCookies", True))
+    if prefer_cookies and use_browser == "file":
+        args += ["--cookies-first"]
 
     quality = payload.get("quality")
     if isinstance(quality, int):
@@ -191,19 +208,30 @@ def handle_udemy_start(req):
     if TOOLS_DIR.exists():
         env['PATH'] = str(TOOLS_DIR) + os.pathsep + env.get('PATH', '')
 
-    try:
-        proc = subprocess.Popen(
-            args,
-            cwd=str(ROOT),
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-            bufsize=1,
-            creationflags=creationflags,
-            env=env,
-        )
-    except Exception as e:
-        _send_response(req.get("id"), False, error=f"spawn_failed: {e}")
+    # Optional bearer token (fallback or primary). We set env always; downloader will honor --cookies-first
+    bearer = payload.get("bearer")
+    if isinstance(bearer, str) and len(bearer) > 0:
+        env['UDEMY_BEARER'] = bearer
+
+    def _spawn(args_to_use, env_to_use):
+        try:
+            pr = subprocess.Popen(
+                args_to_use,
+                cwd=str(ROOT),
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                bufsize=1,
+                creationflags=creationflags,
+                env=env_to_use,
+            )
+            return pr, None
+        except Exception as e:
+            return None, e
+
+    proc, err = _spawn(args, env)
+    if err:
+        _send_response(req.get("id"), False, error=f"spawn_failed: {err}")
         return
 
     JOBS[job_id] = {"proc": proc, "start": time.time(), "args": args}
@@ -215,9 +243,31 @@ def handle_udemy_start(req):
         rc = proc.wait()
         if rc == 0:
             _send_event("job.completed", {"jobId": job_id, "code": rc})
+            JOBS.pop(job_id, None)
+            return
+        # Non-zero: If bearer provided and we preferred cookies-first, retry once with explicit -b
+        if bearer and prefer_cookies:
+            try_args = [a for a in args if a != "--cookies-first"]
+            try_args += ["-b", bearer]
+            _send_event("job.retry_bearer", {"jobId": job_id, "code": rc, "args": try_args})
+            proc2, err2 = _spawn(try_args, env)
+            if err2:
+                _send_event("job.failed", {"jobId": job_id, "code": rc, "error": f"retry_spawn_failed:{err2}"})
+                JOBS.pop(job_id, None)
+                return
+            JOBS[job_id] = {"proc": proc2, "start": time.time(), "args": try_args}
+            _stream_thr = threading.Thread(target=_stream_proc_output, args=(job_id, proc2), daemon=True)
+            _stream_thr.start()
+            rc2 = proc2.wait()
+            if rc2 == 0:
+                _send_event("job.completed", {"jobId": job_id, "code": rc2})
+            else:
+                _send_event("job.failed", {"jobId": job_id, "code": rc2})
+            JOBS.pop(job_id, None)
+            return
         else:
             _send_event("job.failed", {"jobId": job_id, "code": rc})
-        JOBS.pop(job_id, None)
+            JOBS.pop(job_id, None)
 
     threading.Thread(target=_waiter, daemon=True).start()
 

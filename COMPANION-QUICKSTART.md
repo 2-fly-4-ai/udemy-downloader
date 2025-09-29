@@ -14,7 +14,10 @@ Option A — One‑Click Installer (for users)
   - Installer auto‑registers the Native Messaging host
   - It opens the Chrome Web Store page for your extension (if slug provided). Install the extension
   - Click the extension → “Ping” then “Info” to verify host/tools
-  - Paste a Udemy course URL → “Start”
+  - Paste a Udemy course URL
+  - Optional: check “Use cookies (extract…)” to generate `cookies.txt` automatically
+  - Optional: paste a bearer token; the host will retry with it if cookies fail
+  - Click “Start”
 
 Option B — Dev Mode (no installer)
 - Chrome installed and logged into Udemy
@@ -27,6 +30,7 @@ Option B — Dev Mode (no installer)
 
 Notes
 - Authentication uses `--browser chrome`; ensure you’re logged into Udemy in Chrome
+- The popup can extract cookies and pass them to the downloader as `cookies.txt` and will prefer those first. If a bearer token is provided, the host will retry with bearer only if the cookies run fails.
 - DRM content requires `keyfile.json` in install directory (or repo root in dev mode)
 - Downloads default to `~/Videos/Udemy` (falls back to `~/Downloads/Udemy`)
 - Popup now has “Cancel” and “Info” buttons; Info shows tool versions and paths

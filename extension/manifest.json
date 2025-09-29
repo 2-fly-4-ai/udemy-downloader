@@ -3,7 +3,7 @@
   "description": "Quickly send Udemy downloads to the desktop companion via Native Messaging.",
   "version": "0.1.0",
   "manifest_version": 3,
-  "permissions": ["nativeMessaging", "storage", "activeTab"],
+  "permissions": ["nativeMessaging", "storage", "activeTab", "cookies"],
   "host_permissions": [
     "https://*.udemy.com/*",
     "http://127.0.0.1/*",

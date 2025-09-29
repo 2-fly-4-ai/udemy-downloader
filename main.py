@@ -63,6 +63,7 @@ browser = None
 cj = None
 use_continuous_lecture_numbers = False
 chapter_filter = None
+cookies_first = False
 
 
 def deEmojify(inputStr: str):
@@ -113,7 +114,7 @@ def _mask(val: str, keep_start: int = 6, keep_end: int = 4) -> str:
 
 # this is the first function that is called, we parse the arguments, setup the logger, and ensure that required directories exist
 def pre_run():
-    global dl_assets, dl_captions, dl_quizzes, skip_lectures, caption_locale, quality, bearer_token, course_name, keep_vtt, skip_hls, concurrent_downloads, load_from_file, save_to_file, bearer_token, course_url, info, logger, keys, id_as_course_name, LOG_LEVEL, use_h265, h265_crf, h265_preset, use_nvenc, browser, is_subscription_course, DOWNLOAD_DIR, use_continuous_lecture_numbers, chapter_filter
+    global dl_assets, dl_captions, dl_quizzes, skip_lectures, caption_locale, quality, bearer_token, course_name, keep_vtt, skip_hls, concurrent_downloads, load_from_file, save_to_file, bearer_token, course_url, info, logger, keys, id_as_course_name, LOG_LEVEL, use_h265, h265_crf, h265_preset, use_nvenc, browser, is_subscription_course, DOWNLOAD_DIR, use_continuous_lecture_numbers, chapter_filter, cookies_first
 
     # make sure the logs directory exists
     if not os.path.exists(LOG_DIR_PATH):
@@ -228,6 +229,12 @@ def pre_run():
         dest="log_level",
         type=str,
         help="Logging level: one of DEBUG, INFO, ERROR, WARNING, CRITICAL (Default is INFO)",
+    )
+    parser.add_argument(
+        "--cookies-first",
+        dest="cookies_first",
+        action="store_true",
+        help="Prefer cookies over bearer if both are available (env UDEMY_BEARER is ignored unless -b is provided)",
     )
     parser.add_argument(
         "--browser",
@@ -361,6 +368,8 @@ def pre_run():
         DOWNLOAD_DIR = os.path.abspath(args.out)
     if args.use_continuous_lecture_numbers:
         use_continuous_lecture_numbers = args.use_continuous_lecture_numbers
+    if args.cookies_first:
+        cookies_first = True
 
     # setup a logger
     logger = logging.getLogger(__name__)
@@ -409,20 +418,22 @@ class Udemy:
         global cj
 
         self.session = None
-        self.bearer_token = None
+        self.bearer_token = bearer_token
         self.auth = UdemyAuth(cache_session=False)
         self.session = self.auth._session
         # if not self.session:
         #     self.session = self.auth.authenticate(bearer_token=bearer_token)
+        # Validate we have an auth path
+        if not self.bearer_token and browser is None:
+            logger.error("No bearer token was provided, and no browser for cookie extraction was specified.")
+            sys.exit(1)
 
-        if not self.session:
-            if browser == None:
-                logger.error("No bearer token was provided, and no browser for cookie extraction was specified.")
-                sys.exit(1)
-
-            logger.warning("No bearer token was provided, attempting to use browser cookies.")
-
-            self.session = self.auth._session
+        # If a browser mode is specified, load cookies; we will switch headers AFTER visit()
+        if browser is not None:
+            if not self.bearer_token:
+                logger.warning("No bearer token was provided, attempting to use browser cookies.")
+            else:
+                logger.info("> Cookies-first enabled; trying cookies before bearer")
 
             logger.info("> Loading cookies from browser mode: %s", browser)
             try:
@@ -463,75 +474,16 @@ class Udemy:
                     "> Udemy cookie names: %s",
                     ", ".join(sorted({c.name for c in udemy_cookies})) or "(none)"
                 )
-            except Exception:
-                pass
-
-            # Adjust headers for web cookie-based API calls
-            try:
-                h = self.session._session.headers
-                # Remove Android/mobile auth headers that can cause 403s with web cookies
-                for k in (
-                    "authorization",  # Basic ... from Android client
-                    "x-udemy-client-id",
-                    "x-udemy-client-secret",
-                    "x-mobile-visit-enabled",
-                    "x-version-name",
-                    "x-client-name",
-                ):
-                    if k in h:
-                        h.pop(k, None)
-
-                # Set browser-like headers
-                h.update(
-                    {
-                        "User-Agent": (
-                            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                            "AppleWebKit/537.36 (KHTML, like Gecko) "
-                            "Chrome/120.0.0.0 Safari/537.36"
-                        ),
-                        "Accept": "application/json, text/plain, */*",
-                        "Referer": "https://www.udemy.com/",
-                        "Origin": "https://www.udemy.com",
-                        "Accept-Language": "en-US,en;q=0.9",
-                        "X-Requested-With": "XMLHttpRequest",
-                    }
-                )
-
-                # If an access_token cookie is present, also set Bearer headers
-                access_token = None
+                # Ensure session cookie jar contains loaded cookies
                 try:
-                    # CookieJar may have multiple domains; pick from any udemy domain
-                    for c in cj:
-                        if c.name == "access_token" and (c.domain.endswith("udemy.com") or c.domain == ".udemy.com"):
-                            access_token = c.value.strip('"')
-                            break
-                except Exception:
-                    access_token = None
-
-                if access_token:
-                    h.update(
-                        {
-                            "authorization": f"Bearer {access_token}",
-                            "x-udemy-bearer-token": access_token,
-                        }
-                    )
-                    try:
-                        logger.info("> Attached bearer from cookies (auth=%s)", _mask(access_token))
-                    except Exception:
-                        pass
-
-                # Also attach CSRF for POSTs if present
-                try:
-                    for c in cj:
-                        if c.name == "csrftoken" and (c.domain.endswith("udemy.com") or c.domain == ".udemy.com"):
-                            h["X-CSRFToken"] = c.value
-                            logger.debug("> Attached CSRF token from cookies (csrftoken=%s)", _mask(c.value))
-                            break
+                    self.session._session.cookies.update(cj)
+                    cj = self.session._session.cookies
                 except Exception:
                     pass
             except Exception:
-                # Non-fatal; fall back to whatever headers we had
                 pass
+
+            # Do not change headers here; visit() needs the original Android headers to pass CF
 
     def _get_quiz(self, quiz_id):
         # self.session._headers.update(
@@ -554,6 +506,83 @@ class Udemy:
 
     def _get_elem_value_or_none(self, elem, key):
         return elem[key] if elem and key in elem else "(None)"
+
+    def apply_cookie_auth_headers(self):
+        """Attach bearer/CSRF headers derived from cookies while keeping the Android session headers."""
+        try:
+            h = self.session._session.headers
+
+            # If an access_token cookie is present, also set Bearer headers
+            access_token = None
+            try:
+                for c in cj:
+                    if c.name == "access_token" and (c.domain.endswith("udemy.com") or c.domain == ".udemy.com"):
+                        access_token = c.value.strip('"')
+                        break
+            except Exception:
+                access_token = None
+
+            if access_token:
+                h.update(
+                    {
+                        "authorization": f"Bearer {access_token}",
+                        "Authorization": f"Bearer {access_token}",
+                        "x-udemy-authorization": f"Bearer {access_token}",
+                        "X-Udemy-Authorization": f"Bearer {access_token}",
+                        "x-udemy-bearer-token": access_token,
+                        "X-Udemy-Bearer-Token": access_token,
+                    }
+                )
+                try:
+                    logger.info("> Attached bearer from cookies (auth=%s)", _mask(access_token))
+                    logger.debug("> Bearer (full) %s", access_token)
+                except Exception:
+                    pass
+
+            # Also attach CSRF for POSTs if present
+            try:
+                for c in cj:
+                    if c.name == "csrftoken" and (c.domain.endswith("udemy.com") or c.domain == ".udemy.com"):
+                        h["X-CSRFToken"] = c.value
+                        logger.debug("> Attached CSRF token from cookies (csrftoken=%s)", _mask(c.value))
+                        logger.debug("> CSRF (full) %s", c.value)
+                        break
+            except Exception:
+                pass
+
+            # Attach client id if present
+            try:
+                client_id = None
+                for c in cj:
+                    if c.name == "client_id" and (c.domain.endswith("udemy.com") or c.domain == ".udemy.com"):
+                        client_id = c.value
+                        break
+                if client_id:
+                    h["X-Udemy-Client-Id"] = client_id
+                    logger.debug("> X-Udemy-Client-Id from cookies: %s", client_id)
+            except Exception:
+                pass
+
+            # Propagate Udemy user JWT if present (some APIs honor it)
+            try:
+                user_jwt = None
+                for c in cj:
+                    if c.name == "ud_user_jwt" and (c.domain.endswith("udemy.com") or c.domain == ".udemy.com"):
+                        user_jwt = c.value
+                        break
+                if user_jwt:
+                    h["X-Udemy-User-Jwt"] = user_jwt
+                    logger.debug("> X-Udemy-User-Jwt attached")
+            except Exception:
+                pass
+
+            try:
+                logger.debug("> Session headers now: %s", dict(h))
+            except Exception:
+                pass
+        except Exception:
+            # Non-fatal; fall back to whatever headers we had
+            pass
 
     def _get_quiz_with_info(self, quiz_id):
         resp = {"_class": None, "_type": None, "contents": None}
@@ -1272,6 +1301,12 @@ class Session(object):
             logger.info("Visit request successful")
             return True
         logger.error(f"Visit request failed: {r.status_code} {r.reason}")
+        try:
+            body = r.text.strip()
+            if body:
+                logger.error(f"Visit response body: {body[:1000]}")
+        except Exception:
+            pass
         return False
 
     # def _set_auth_headers(self, bearer_token=""):
@@ -1285,7 +1320,7 @@ class Session(object):
         except Exception:
             host = None
         for i in range(10):
-            req = self._session.get(url, cookies=cj, params=params)
+            req = self._session.get(url, params=params)
             if req.ok or req.status_code in [502, 503]:
                 return req
             if not req.ok:
@@ -1298,7 +1333,7 @@ class Session(object):
                     csrf = h.get("X-CSRFToken")
                     ua = h.get("User-Agent")
                     # Count cookies for the request host
-                    _cookies_list = list(cj) if cj is not None else []
+                    _cookies_list = list(self._session.cookies)
                     host_cookies = [c for c in _cookies_list if (host and c.domain and (c.domain == host or host.endswith(c.domain.lstrip('.'))))]
                     logger.debug(
                         "> Request debug: host=%s ua=%s auth_present=%s csrf_present=%s host_cookie_count=%d host_cookie_names=%s",
@@ -1311,14 +1346,23 @@ class Session(object):
                     )
                     if auth:
                         logger.debug("> Authorization: %s", _mask(auth))
+                        logger.debug("> Authorization (full): %s", auth)
                     if csrf:
                         logger.debug("> X-CSRFToken: %s", _mask(csrf))
+                        logger.debug("> X-CSRFToken (full): %s", csrf)
+                    try:
+                        logger.debug("> Sent headers: %s", dict(req.request.headers))
+                    except Exception:
+                        pass
+                    body = req.text.strip()
+                    if body:
+                        logger.debug("> Response body: %s", body[:1000])
                 except Exception:
                     pass
                 time.sleep(0.8)
 
     def _post(self, url, data, redirect=True):
-        req = self._session.post(url, data, allow_redirects=redirect, cookies=cj)
+        req = self._session.post(url, data, allow_redirects=redirect)
         if req.ok:
             return req
         if not req.ok:
@@ -2110,9 +2154,17 @@ def main():
 
     load_dotenv()
     if bearer_token:
+        # CLI provided; always prefer explicit token
         bearer_token = bearer_token
     else:
-        bearer_token = os.getenv("UDEMY_BEARER")
+        # Env var fallback, unless cookies-first is requested with a browser mode
+        env_bearer = os.getenv("UDEMY_BEARER")
+        if cookies_first and browser:
+            if env_bearer:
+                logger.info("> Cookies-first: deferring env bearer token")
+            bearer_token = None
+        else:
+            bearer_token = env_bearer
 
     udemy = Udemy(bearer_token)
     portal_name = udemy.extract_portal_name(course_url)
@@ -2120,6 +2172,20 @@ def main():
     if not visit_status:
         logger.fatal("> Visit request failed")
         sys.exit(1)
+    else:
+        try:
+            cookie_names = [c.name for c in udemy.session._session.cookies if c.domain and c.domain.endswith("udemy.com")]
+            logger.debug("> Session cookies after visit: %s", cookie_names)
+        except Exception:
+            pass
+
+    # After visit passes, if we're in cookie mode, switch to web headers
+    if browser is not None and not bearer_token:
+        try:
+            udemy.apply_cookie_auth_headers()
+            logger.info("> Using browser cookies for authentication")
+        except Exception:
+            logger.warning("> Failed to apply web headers from cookies; continuing")
 
     if bearer_token:
         udemy.session._session.headers.update(
@@ -2127,13 +2193,18 @@ def main():
                 "x-udemyandroid-skip-local-cache": "true",
                 "cache-control": "no-cache",
                 "x-udemy-bearer-token": bearer_token,
+                "X-Udemy-Bearer-Token": bearer_token,
                 "authorization": f"Bearer {bearer_token}",
+                "Authorization": f"Bearer {bearer_token}",
+                "x-udemy-authorization": f"Bearer {bearer_token}",
+                "X-Udemy-Authorization": f"Bearer {bearer_token}",
             }
         )
         logger.info("> Using bearer token authentication")
+        logger.debug("> Bearer token (full) %s", bearer_token)
     else:
-        # No bearer token — continue with browser/file cookies loaded in Udemy().__init__
-        logger.info("> Using browser cookies for authentication")
+        # No bearer token — we already applied cookies above
+        pass
 
     logger.info("> Fetching course information, this may take a minute...")
     if not load_from_file:
