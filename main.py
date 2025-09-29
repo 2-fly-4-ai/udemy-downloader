@@ -156,9 +156,26 @@ def _mask(val: str, keep_start: int = 6, keep_end: int = 4) -> str:
 def pre_run():
     global dl_assets, dl_captions, dl_quizzes, skip_lectures, caption_locale, quality, bearer_token, course_name, keep_vtt, skip_hls, concurrent_downloads, load_from_file, save_to_file, bearer_token, course_url, info, logger, keys, id_as_course_name, LOG_LEVEL, use_h265, h265_crf, h265_preset, use_nvenc, browser, is_subscription_course, DOWNLOAD_DIR, use_continuous_lecture_numbers, chapter_filter, cookies_first
 
-    # make sure the logs directory exists
-    if not os.path.exists(LOG_DIR_PATH):
-        os.makedirs(LOG_DIR_PATH, exist_ok=True)
+    # make sure the logs directory exists and touch the file early for visibility
+    try:
+        if not os.path.exists(LOG_DIR_PATH):
+            os.makedirs(LOG_DIR_PATH, exist_ok=True)
+        try:
+            # Touch the file so users can see it immediately
+            with open(LOG_FILE_PATH, "a", encoding="utf-8"):
+                pass
+        except Exception:
+            pass
+        try:
+            print(f"[boot] cwd={os.getcwd()} app_root={HOME_DIR} logs_dir={LOG_DIR_PATH} log_file={LOG_FILE_PATH}")
+        except Exception:
+            pass
+        try:
+            sys.stdout.flush()
+        except Exception:
+            pass
+    except Exception:
+        pass
 
     parser = argparse.ArgumentParser(description="Udemy Downloader")
     parser.add_argument(
@@ -425,15 +442,42 @@ def pre_run():
     stream.setLevel(LOG_LEVEL)
     stream.setFormatter(console_formatter)
 
-    # create a handler for file logging
-    file_handler = logging.FileHandler(LOG_FILE_PATH)
-    file_handler.setFormatter(file_formatter)
+    # create a handler for file logging, with fallback if primary path fails
+    fh = None
+    try:
+        fh = logging.FileHandler(LOG_FILE_PATH, encoding="utf-8")
+    except Exception as e:
+        try:
+            # Fallback to a user-writable location under home if app root fails
+            fallback_dir = os.path.join(os.path.expanduser("~"), "SERP Companion", "logs")
+            os.makedirs(fallback_dir, exist_ok=True)
+            fallback_file = os.path.join(
+                fallback_dir, os.path.basename(LOG_FILE_PATH)
+            )
+            fh = logging.FileHandler(fallback_file, encoding="utf-8")
+            try:
+                print(f"[boot] log fallback engaged: {fallback_file} (reason: {e})")
+                sys.stdout.flush()
+            except Exception:
+                pass
+        except Exception:
+            fh = None
+    file_handler = fh if fh is not None else logging.NullHandler()
+    if not isinstance(file_handler, logging.NullHandler):
+        file_handler.setFormatter(file_formatter)
 
     # construct the logger
     logger = logging.getLogger("udemy-downloader")
     logger.setLevel(LOG_LEVEL)
     logger.addHandler(stream)
-    logger.addHandler(file_handler)
+    if not isinstance(file_handler, logging.NullHandler):
+        logger.addHandler(file_handler)
+    else:
+        try:
+            print("[boot] WARNING: file logging disabled; using console only")
+            sys.stdout.flush()
+        except Exception:
+            pass
 
     logger.info(f"Output directory set to {DOWNLOAD_DIR}")
 
@@ -1536,6 +1580,23 @@ def mux_process(
 
 
 def handle_segments(url, format_id, lecture_id, video_title, output_path, chapter_dir):
+    def _timed_extract_kid(path: str, timeout_sec: int = 15):
+        """Extract KID with a timeout to avoid hangs on corrupted files."""
+        import threading
+        result = {"kid": None}
+
+        def _run():
+            try:
+                result["kid"] = extract_kid(path)
+            except Exception:
+                result["kid"] = None
+
+        t = threading.Thread(target=_run, daemon=True)
+        t.start()
+        t.join(timeout=timeout_sec)
+        if t.is_alive():
+            return None, True  # (kid, timed_out)
+        return result["kid"], False
     os.chdir(os.path.join(chapter_dir))
 
     video_filepath_enc = lecture_id + ".encrypted.mp4"
@@ -1582,19 +1643,79 @@ def handle_segments(url, format_id, lecture_id, video_title, output_path, chapte
     audio_kid = None
     video_kid = None
 
-    try:
-        video_kid = extract_kid(video_filepath_enc)
-        logger.info("KID for video file is: " + video_kid)
-    except Exception:
-        logger.exception(f"Error extracting video kid")
+    # Extract KIDs with timeout so we don't hang on bad files
+    video_kid, video_timeout = _timed_extract_kid(video_filepath_enc, timeout_sec=20)
+    if video_timeout:
+        logger.error("Timeout extracting video KID; skipping lecture")
         return
+    if video_kid is None:
+        logger.error("Failed to extract video KID; skipping lecture")
+        return
+    try:
+        logger.info("KID for video file is: %s", video_kid)
+    except Exception:
+        pass
 
-    try:
-        audio_kid = extract_kid(audio_filepath_enc)
-        logger.info("KID for audio file is: " + audio_kid)
-    except Exception:
-        logger.exception(f"Error extracting audio kid")
+    audio_kid, audio_timeout = _timed_extract_kid(audio_filepath_enc, timeout_sec=20)
+    if audio_timeout:
+        logger.warning("Timeout extracting audio KID; attempting fresh redownload of tracks")
+        # Try once: delete encrypted files and redownload
+        try:
+            if os.path.exists(video_filepath_enc):
+                os.remove(video_filepath_enc)
+            if os.path.exists(audio_filepath_enc):
+                os.remove(audio_filepath_enc)
+        except Exception:
+            pass
+        # Re-run download once without continue/with overwrite
+        try:
+            args = [
+                "yt-dlp",
+                "--enable-file-urls",
+                "--force-generic-extractor",
+                "--allow-unplayable-formats",
+                "--concurrent-fragments",
+                f"{concurrent_downloads}",
+                "--downloader",
+                "aria2c",
+                "--downloader-args",
+                'aria2c:"--disable-ipv6"',
+                "--fixup",
+                "never",
+                "-k",
+                "--no-continue",
+                "--force-overwrites",
+                "-o",
+                f"{lecture_id}.encrypted.%(ext)s",
+                "-f",
+                format_id,
+                f"{url}",
+            ]
+            process = subprocess.Popen(
+                args,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                bufsize=1,
+                encoding="utf-8",
+            )
+            log_subprocess_output("YTDLP", process.stdout)
+            rc = process.wait()
+            logger.info("> Redownloaded tracks rc=%s", rc)
+        except Exception:
+            logger.exception("Redownload attempt failed")
+        # Try extract again (no further retries)
+        audio_kid, audio_timeout = _timed_extract_kid(audio_filepath_enc, timeout_sec=20)
+    if audio_timeout:
+        logger.error("Timeout extracting audio KID after retry; skipping lecture")
         return
+    if audio_kid is None:
+        logger.error("Failed to extract audio KID; skipping lecture")
+        return
+    try:
+        logger.info("KID for audio file is: %s", audio_kid)
+    except Exception:
+        pass
 
     audio_key = None
     video_key = None

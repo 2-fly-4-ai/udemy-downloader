@@ -2,52 +2,134 @@
 <html>
   <head>
     <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>SERP Companion</title>
     <style>
-      body { font: 13px system-ui, sans-serif; margin: 12px; width: 320px; }
-      input[type=text] { width: 100%; box-sizing: border-box; padding: 6px; }
-      .row { margin-top: 8px; }
-      .log { background: #111; color: #0f0; height: 180px; overflow: auto; padding: 6px; white-space: pre-wrap; }
-      button { padding: 6px 10px; }
-      label { display: flex; align-items: center; gap: 6px; }
+      :root {
+        --bg: #0b0f14;
+        --card: #121923;
+        --muted: #7c8da0;
+        --text: #e6edf3;
+        --accent: #6aa9ff;
+        --accent-2: #8dd1ff;
+        --border: #223042;
+        --success: #19c37d;
+        --danger: #ff6b6b;
+        --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+      }
+      * { box-sizing: border-box; }
+      html, body { margin: 0; padding: 0; }
+      body { font: 13px system-ui, -apple-system, Segoe UI, Roboto, sans-serif; color: var(--text); background: var(--bg); width: 360px; }
+      .wrap { padding: 12px; }
+      .header { display:flex; align-items:center; justify-content:space-between; margin-bottom: 8px; }
+      .title { font-weight: 600; font-size: 14px; letter-spacing: .2px; }
+      .card { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 10px; }
+      .row { display: grid; gap: 6px; margin-top: 10px; }
+      .two { grid-template-columns: 1fr 1fr; gap: 8px; }
+      label.block { display:block; color: var(--muted); font-weight: 600; font-size: 12px; margin-bottom: 4px; }
+      input[type=text], select { width: 100%; padding: 8px 10px; border-radius: 8px; border: 1px solid var(--border); background: #0e141c; color: var(--text); outline: none; }
+      input[type=text]::placeholder { color: #5d6b7a; }
+      .inline { display:flex; align-items:center; gap:8px; }
+      .switch { position: relative; display: inline-block; width: 36px; height: 20px; }
+      .switch input { opacity: 0; width: 0; height: 0; }
+      .slider { position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: #2a3646; transition: .2s; border-radius: 999px; }
+      .slider:before { position: absolute; content: ""; height: 14px; width: 14px; left: 3px; bottom: 3px; background-color: white; transition: .2s; border-radius: 50%; }
+      .switch input:checked + .slider { background-color: var(--accent); }
+      .switch input:checked + .slider:before { transform: translateX(16px); }
+      .muted { color: var(--muted); font-size: 12px; }
+      .btns { display:flex; flex-wrap: wrap; gap: 8px; }
+      button { padding: 8px 10px; border-radius: 8px; border: 1px solid var(--border); background: #0e141c; color: var(--text); cursor: pointer; }
+      button.primary { background: linear-gradient(180deg, var(--accent), var(--accent-2)); color: #001528; border: none; font-weight: 600; }
+      button.danger { border-color: #3a2323; background: #1c1111; color: #ffb3b3; }
+      button:disabled { opacity: .6; cursor: not-allowed; }
+      details summary { cursor: pointer; }
+      .log { background: #071018; color: #a0ffb0; height: 180px; overflow: auto; padding: 8px; border-radius: 8px; border: 1px solid var(--border); font-family: var(--mono); font-size: 12px; white-space: pre-wrap; }
     </style>
   </head>
   <body>
-    <div class="row"><strong>Course URL</strong></div>
-    <div class="row"><input id="url" type="text" placeholder="https://www.udemy.com/course/..." /></div>
-    <div class="row">
-      <label><input id="assets" type="checkbox" /> Download assets</label>
-      <label><input id="captions" type="checkbox" /> Download captions (en)</label>
-      <label>Quality: <input id="quality" type="text" placeholder="e.g. 1080" style="width:80px" /></label>
+    <div class="wrap">
+      <div class="header">
+        <div class="title">SERP Companion</div>
+        <button id="reset" class="danger" title="Reset to defaults">Reset</button>
+      </div>
+      <div class="card">
+        <div class="row">
+          <label class="block">Course URL</label>
+          <input id="url" type="text" placeholder="https://www.udemy.com/course/..." />
+        </div>
+        <div class="row two">
+          <div>
+            <label class="block">Quality</label>
+            <select id="qualitySelect">
+              <option value="">Best available (default)</option>
+              <option value="1080">1080p</option>
+              <option value="720">720p</option>
+              <option value="480">480p</option>
+              <option value="360">360p</option>
+              <option value="240">240p</option>
+            </select>
+          </div>
+          <div>
+            <label class="block">Captions Language</label>
+            <select id="langSelect" disabled>
+              <option value="en">English (en)</option>
+              <option value="es">Spanish (es)</option>
+              <option value="it">Italian (it)</option>
+              <option value="pl">Polish (pl)</option>
+              <option value="de">German (de)</option>
+              <option value="fr">French (fr)</option>
+              <option value="pt">Portuguese (pt)</option>
+              <option value="ru">Russian (ru)</option>
+              <option value="tr">Turkish (tr)</option>
+              <option value="ar">Arabic (ar)</option>
+              <option value="hi">Hindi (hi)</option>
+              <option value="zh">Chinese (zh)</option>
+              <option value="ja">Japanese (ja)</option>
+              <option value="ko">Korean (ko)</option>
+              <option value="all">All available (all)</option>
+            </select>
+          </div>
+        </div>
+        <div class="row">
+          <div class="inline">
+            <label class="muted">Download assets</label>
+            <label class="switch"><input id="assets" type="checkbox" /><span class="slider"></span></label>
+            <span style="width:10px"></span>
+            <label class="muted">Download captions</label>
+            <label class="switch"><input id="captions" type="checkbox" /><span class="slider"></span></label>
+          </div>
+          <div class="inline" style="margin-top:6px;">
+            <label class="muted">Use cookies</label>
+            <label class="switch"><input id="useCookies" type="checkbox" checked /><span class="slider"></span></label>
+            <span class="muted">(extract from Chrome)</span>
+          </div>
+        </div>
+        <div class="row">
+          <label class="block">Bearer token (optional; fallback if cookies fail)</label>
+          <input id="bearer" type="text" placeholder="Paste access token here (optional)" />
+        </div>
+        <div class="row">
+          <label class="block">Output folder</label>
+          <input id="outDir" type="text" placeholder="Leave blank for default (Videos\\Udemy)" />
+        </div>
+        <div class="row btns">
+          <button id="ping">Ping</button>
+          <button id="info">Info</button>
+          <button id="pair">Pair Desktop</button>
+          <button id="start" class="primary">Start</button>
+          <button id="cancel">Cancel</button>
+          <button id="openLog">Open Log</button>
+          <button id="clear">Clear Log</button>
+        </div>
+      </div>
+      <div class="row">
+        <details>
+          <summary>Host Info</summary>
+          <pre id="infoPanel" style="background:#0e141c; border:1px solid var(--border); color:var(--text); padding:8px; max-height:140px; overflow:auto; border-radius:8px;">(click Info)</pre>
+        </details>
+      </div>
+      <div class="row"><div id="log" class="log"></div></div>
     </div>
-    <div class="row">
-      <label><input id="useCookies" type="checkbox" checked /> Use cookies (extract from Chrome and send as cookies.txt)</label>
-    </div>
-    <div class="row">
-      <label style="width:100%">Bearer token (optional; used as fallback)
-        <input id="bearer" type="text" placeholder="Paste access token here (optional)" />
-      </label>
-    </div>
-    <div class="row">
-      <label style="width:100%">Output folder
-        <input id="outDir" type="text" placeholder="Leave blank for default (Videos\\Udemy)" />
-      </label>
-    </div>
-    <div class="row" style="display:flex; gap:8px; flex-wrap: wrap;">
-      <button id="ping">Ping</button>
-      <button id="info">Info</button>
-      <button id="pair">Pair Desktop</button>
-      <button id="start">Start</button>
-      <button id="cancel">Cancel</button>
-      <button id="clear">Clear</button>
-    </div>
-    <div class="row">
-      <details>
-        <summary>Host Info</summary>
-        <pre id="infoPanel" style="background:#f6f8fa; padding:8px; max-height:140px; overflow:auto;">(click Info)</pre>
-      </details>
-    </div>
-    <div class="row"><div id="log" class="log"></div></div>
     <script src="popup.js"></script>
   </body>
   </html>

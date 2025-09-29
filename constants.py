@@ -1,6 +1,7 @@
 import base64
 import logging
 import os
+import sys
 import time
 
 CLIENT_SECRET = "f2lgDUDxjFiOlVHUpwQNFUfCQPyMO0tJQMaud53PF01UKueW8enYjeEYoyVeP0bb2XVEDkJ5GLJaVTfM5QgMVz6yyXyydZdA5QhzgvG9UmCPUYaCrIVf7VpmiilfbLJc"
@@ -53,12 +54,25 @@ COURSE_URL_PARAMS = {
     "caching_intent": True,
 }
 
-HOME_DIR = os.getcwd()
-SAVED_DIR = os.path.join(os.getcwd(), "saved")
-KEY_FILE_PATH = os.path.join(os.getcwd(), "keyfile.json")
-COOKIE_FILE_PATH = os.path.join(os.getcwd(), "cookies.txt")
-LOG_DIR_PATH = os.path.join(os.getcwd(), "logs")
-LOG_FILE_PATH = os.path.join(os.getcwd(), "logs", f"{time.strftime('%Y-%m-%d-%I-%M-%S')}.log")
+# Resolve application root independently of current working directory.
+# When frozen (PyInstaller onefile), the exe lives under {app}\bin\, so APP_ROOT is parent.
+# In dev, resolve to the repository root (directory containing this file).
+if getattr(sys, "frozen", False):
+    APP_ROOT = os.path.dirname(os.path.dirname(sys.executable))
+else:
+    APP_ROOT = os.path.dirname(os.path.abspath(__file__))
+
+HOME_DIR = APP_ROOT
+SAVED_DIR = os.path.join(APP_ROOT, "saved")
+KEY_FILE_PATH = os.path.join(APP_ROOT, "keyfile.json")
+COOKIE_FILE_PATH = os.path.join(APP_ROOT, "cookies.txt")
+# Allow host to override log paths so it can tail a known file
+_ENV_LOG_DIR = os.environ.get("UDEMY_LOG_DIR")
+_ENV_LOG_FILE = os.environ.get("UDEMY_LOG_FILE")
+LOG_DIR_PATH = _ENV_LOG_DIR if _ENV_LOG_DIR else os.path.join(APP_ROOT, "logs")
+LOG_FILE_PATH = _ENV_LOG_FILE if _ENV_LOG_FILE else os.path.join(
+    LOG_DIR_PATH, f"{time.strftime('%Y-%m-%d-%I-%M-%S')}.log"
+)
 LOG_FORMAT = "[%(asctime)s] [%(name)s] [%(funcName)s:%(lineno)d] %(levelname)s: %(message)s"
 LOG_DATE_FORMAT = "%I:%M:%S"
 LOG_LEVEL = logging.INFO

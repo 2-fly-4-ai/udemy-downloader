@@ -6,6 +6,7 @@ import subprocess
 import threading
 import uuid
 import time
+from queue import Queue, Full, Empty
 from pathlib import Path
 from urllib.parse import urlparse, parse_qs
 from http.server import HTTPServer, BaseHTTPRequestHandler
@@ -36,6 +37,9 @@ def _write_message(obj: dict):
         # If we cannot write to stdout, there's nothing else we can do
         pass
 
+# Asynchronous event queue to avoid blocking the child process if Chrome isn't reading
+EV_QUEUE: Queue = Queue(maxsize=500)
+
 
 def _send_response(req_id: str, ok: bool, result=None, error=None):
     msg = {"kind": "response", "id": req_id, "ok": ok}
@@ -45,9 +49,25 @@ def _send_response(req_id: str, ok: bool, result=None, error=None):
         msg["error"] = error or "unknown_error"
     _write_message(msg)
 
-
 def _send_event(ev_type: str, payload: dict):
-    _write_message({"kind": "event", "type": ev_type, **payload})
+    try:
+        EV_QUEUE.put_nowait({"kind": "event", "type": ev_type, **payload})
+    except Full:
+        # Drop if UI isn't consuming; child process must not block
+        pass
+
+
+def _writer_loop():
+    while True:
+        try:
+            msg = EV_QUEUE.get(timeout=0.5)
+        except Empty:
+            continue
+        try:
+            _write_message(msg)
+        except Exception:
+            # If writing fails (disconnected extension), drop and continue
+            pass
 
 
 if os.name == 'nt':
@@ -107,6 +127,32 @@ def handle_info(req):
     _send_response(req.get("id"), True, result)
 
 
+def handle_open_log(req):
+    payload = req.get("payload") or {}
+    p = payload.get("path")
+    if not p:
+        _send_response(req.get("id"), False, error="missing_path")
+        return
+    try:
+        path = Path(p)
+        if not path.exists():
+            _send_response(req.get("id"), False, error="not_found")
+            return
+        try:
+            if os.name == 'nt':
+                os.startfile(str(path))  # type: ignore[attr-defined]
+            elif sys.platform == 'darwin':
+                subprocess.Popen(['open', str(path)])
+            else:
+                subprocess.Popen(['xdg-open', str(path)])
+        except Exception as e:
+            _send_response(req.get("id"), False, error=f"open_failed:{e}")
+            return
+        _send_response(req.get("id"), True, {"opened": str(path)})
+    except Exception as e:
+        _send_response(req.get("id"), False, error=f"exception:{e}")
+
+
 def _stream_proc_output(job_id: str, proc: subprocess.Popen):
     try:
         for line in iter(proc.stdout.readline, ''):
@@ -123,6 +169,17 @@ def handle_udemy_start(req):
     if not course_url:
         _send_response(req.get("id"), False, error="missing_course_url")
         return
+
+    # Prevent multiple concurrent jobs to avoid zombie processes and racing logs
+    try:
+        for jid, rec in list(JOBS.items()):
+            pr = rec.get('proc')
+            if pr and pr.poll() is None:
+                _send_event("job.active", {"jobId": jid})
+                _send_response(req.get("id"), False, error=f"job_active:{jid}")
+                return
+    except Exception:
+        pass
 
     # On Windows we require the packaged downloader exe. No Python fallback.
     if os.name == 'nt':
@@ -200,13 +257,15 @@ def handle_udemy_start(req):
 
     creationflags = 0
     if os.name == 'nt':
-        # Do not pop a console window
-        creationflags = getattr(subprocess, 'CREATE_NO_WINDOW', 0)
+        # Do not pop a console window; put process in its own group for easier termination
+        creationflags = getattr(subprocess, 'CREATE_NO_WINDOW', 0) | getattr(subprocess, 'CREATE_NEW_PROCESS_GROUP', 0)
 
     env = os.environ.copy()
     # Prepend bundled tools to PATH to avoid user setup
     if TOOLS_DIR.exists():
         env['PATH'] = str(TOOLS_DIR) + os.pathsep + env.get('PATH', '')
+    # Ensure Python unbuffered output for immediate line flush when running .py in dev
+    env['PYTHONUNBUFFERED'] = '1'
 
     # Optional bearer token (fallback or primary). We set env always; downloader will honor --cookies-first
     bearer = payload.get("bearer")
@@ -229,15 +288,78 @@ def handle_udemy_start(req):
         except Exception as e:
             return None, e
 
-    proc, err = _spawn(args, env)
+    # Prepare deterministic log file path so we can tail it without relying on pipes
+    try:
+        logs_dir = ROOT / 'logs'
+        logs_dir.mkdir(parents=True, exist_ok=True)
+        log_file = logs_dir / (time.strftime('%Y-%m-%d-%I-%M-%S') + '.log')
+        # Create the file up front so it exists immediately
+        try:
+            log_file.touch(exist_ok=True)
+        except Exception:
+            pass
+        env['UDEMY_LOG_DIR'] = str(logs_dir)
+        env['UDEMY_LOG_FILE'] = str(log_file)
+    except Exception:
+        log_file = None
+
+    # Spawn child with stdio detached from our pipes to avoid backpressure deadlocks
+    def _spawn_detached(args_to_use, env_to_use):
+        try:
+            pr = subprocess.Popen(
+                args_to_use,
+                cwd=str(ROOT),
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                text=True,
+                bufsize=1,
+                creationflags=creationflags,
+                env=env_to_use,
+            )
+            return pr, None
+        except Exception as e:
+            return None, e
+
+    proc, err = _spawn_detached(args, env)
     if err:
         _send_response(req.get("id"), False, error=f"spawn_failed: {err}")
         return
 
     JOBS[job_id] = {"proc": proc, "start": time.time(), "args": args}
 
-    t = threading.Thread(target=_stream_proc_output, args=(job_id, proc), daemon=True)
-    t.start()
+    # Start tailer of the log file (if available) to stream lines to UI
+    def _tail_log(job_id: str, path: str):
+        if not path:
+            return
+        try:
+            # Wait for file to become non-empty for a short time
+            for _ in range(50):
+                try:
+                    if os.path.getsize(path) >= 0:
+                        break
+                except Exception:
+                    pass
+                time.sleep(0.1)
+            with open(path, 'r', encoding='utf-8', errors='replace') as f:
+                # Stream appended lines
+                while True:
+                    line = f.readline()
+                    if not line:
+                        # Check if process ended
+                        try:
+                            if proc.poll() is not None:
+                                break
+                        except Exception:
+                            pass
+                        time.sleep(0.2)
+                        continue
+                    _send_event("job.log", {"jobId": job_id, "line": line.rstrip()})
+        except Exception as e:
+            _send_event("job.log", {"jobId": job_id, "line": f"[host] log tail error: {e}"})
+
+    if log_file:
+        threading.Thread(target=_tail_log, args=(job_id, str(log_file)), daemon=True).start()
 
     def _waiter():
         rc = proc.wait()
@@ -272,7 +394,10 @@ def handle_udemy_start(req):
     threading.Thread(target=_waiter, daemon=True).start()
 
     _send_response(req.get("id"), True, {"jobId": job_id})
-    _send_event("job.started", {"jobId": job_id, "args": args})
+    started_payload = {"jobId": job_id, "args": args, "cwd": str(ROOT)}
+    if log_file:
+        started_payload["logFile"] = str(log_file)
+    _send_event("job.started", started_payload)
 
 
 def handle_udemy_cancel(req):
@@ -284,9 +409,20 @@ def handle_udemy_cancel(req):
     proc = JOBS[job_id]["proc"]
     try:
         if os.name == 'nt':
-            proc.terminate()
+            # Terminate entire process tree (downloader + yt-dlp/ffmpeg children)
+            try:
+                subprocess.run(["taskkill", "/PID", str(proc.pid), "/T", "/F"], check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            except Exception:
+                pass
+            try:
+                proc.kill()
+            except Exception:
+                pass
         else:
-            proc.terminate()
+            try:
+                proc.terminate()
+            except Exception:
+                pass
         _send_response(req.get("id"), True, {"jobId": job_id})
         _send_event("job.canceled", {"jobId": job_id})
     except Exception as e:
@@ -296,6 +432,9 @@ def handle_udemy_cancel(req):
 HANDLERS = {
     "companion.ping": handle_ping,
     "companion.info": handle_info,
+    # Open a file (e.g., current log) in the OS default app
+    # Payload: { path: "C:\\...\\logs\\....log" }
+    "companion.openLog": handle_open_log,
     "udemy.start": handle_udemy_start,
     "udemy.cancel": handle_udemy_cancel,
 }
@@ -440,6 +579,10 @@ def run_pair_server(port=None):
 
 
 def main():
+    # Start async writer thread for event messages
+    t_writer = threading.Thread(target=_writer_loop, daemon=True)
+    t_writer.start()
+
     _send_event("host.ready", {
         "root": str(ROOT),
         "bin": str(BIN_DIR) if getattr(sys, 'frozen', False) else None,
