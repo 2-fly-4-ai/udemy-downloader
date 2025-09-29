@@ -71,13 +71,31 @@ You will need to get a few things before you can use this program:
 -   Decryption Key ID
 -   Decryption Key
 -   Udemy Course URL
--   Udemy Bearer Token (aka acccess token for udemy-dl users)
--   Udemy cookies (only required for subscription plans - see [Udemy Subscription Plans](#udemy-subscription-plans))
+-   Authentication (choose one):
+    -   Recommended: Browser cookies (works for purchased and subscription courses)
+    -   Alternative: Bearer token (access token)
 
 ## Setting up
 
 -   rename `.env.sample` to `.env` _(you only need to do this if you plan to use the .env file to store your bearer token)_
 -   rename `keyfile.example.json` to `keyfile.json`
+
+## Authentication
+
+By default, when launched from the Desktop Companion, the downloader uses your browser cookies (Chrome) automatically. This is the recommended method and works for both individually purchased and subscription courses.
+
+Options:
+
+-   Use browser cookies (recommended):
+    -   Ensure you are logged into Udemy in your browser.
+    -   Run with `--browser chrome` (or `firefox`, `edge`, `brave`, `chromium`, `vivaldi`). The companion already passes `--browser chrome` for you.
+-   Use a cookies.txt file (advanced/portable):
+    -   Export cookies for `udemy.com` using a “cookies.txt” exporter (e.g., “Get cookies.txt LOCALLY”).
+    -   Save the file as `cookies.txt` in the current working directory.
+      -   When using the one‑click installer, the companion runs the downloader with the app install directory as the working directory. Place `cookies.txt` next to the installed EXEs if you choose the `--browser file` mode.
+    -   Run with `--browser file`.
+-   Use Bearer token (alternative):
+    -   Set via CLI `-b <token>` or set env var `UDEMY_BEARER`.
 
 ## Acquire Bearer Token
 
@@ -98,21 +116,14 @@ You will need to get a few things before you can use this program:
 
 ## Cookies
 
-> [!TIP]
-> Cookies are not required for individually purchased courses.
+To access courses (especially subscription content), cookies are preferred. The downloader can:
 
-To download a course included in a subscription plan that you did not purchase individually, you will need to use cookies. You can also use cookies as an alternative to Bearer Tokens.
+-   Auto-extract cookies from a supported browser with `--browser <name>`.
+-   Load a Netscape cookies file with `--browser file` (expects `cookies.txt` in the working directory).
 
-The program can automatically extract them from your browser. You can specify what browser to extract cookies from with the `--browser` argument. Supported browsers are:
+Supported values for `--browser` in this build: `chrome`, `firefox`, `edge`, `brave`, `chromium`, `vivaldi`, `opera`, `file`.
 
--   `chrome`
--   `firefox`
--   `opera`
--   `edge`
--   `brave`
--   `chromium`
--   `vivaldi`
--   `safari`
+Tip: The Desktop Companion uses `--browser chrome` by default, so you usually don’t need to configure anything — just ensure you’re logged into Udemy in Chrome.
 
 ## Ready to go
 
@@ -174,6 +185,14 @@ options:
 -   Passing a Bearer Token and Course ID as an argument
     -   `python main.py -c <Course URL> -b <Bearer Token>`
     -   `python main.py -c https://www.udemy.com/courses/myawesomecourse -b <Bearer Token>`
+    
+-   Using browser cookies (recommended)
+    -   `python main.py -c <Course URL> --browser chrome`
+    -   `python main.py -c <Course URL> --browser firefox`
+
+-   Using a cookies.txt file
+    -   Export cookies to Netscape format as `cookies.txt` in the current directory, then:
+    -   `python main.py -c <Course URL> --browser file`
 -   Download a specific quality
     -   `python main.py -c <Course URL> -q 720`
 -   Download assets along with lectures
@@ -306,3 +325,8 @@ See quick usage in `COMPANION-QUICKSTART.md`:1.
 - Installer script: `packaging/windows/installer.iss`:1
 - Local build script: `packaging/windows/build.bat`:1
 - Quickstart: `COMPANION-QUICKSTART.md`:1
+
+
+Use to rebuild
+
+powershell -ExecutionPolicy Bypass -File packaging\windows\dev.ps1 -Release

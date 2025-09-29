@@ -430,6 +430,72 @@ class Udemy:
                 cj = MozillaCookieJar("cookies.txt")
                 cj.load()
 
+            # Adjust headers for web cookie-based API calls
+            try:
+                h = self.session._session.headers
+                # Remove Android/mobile auth headers that can cause 403s with web cookies
+                for k in (
+                    "authorization",  # Basic ... from Android client
+                    "x-udemy-client-id",
+                    "x-udemy-client-secret",
+                    "x-mobile-visit-enabled",
+                    "x-version-name",
+                    "x-client-name",
+                ):
+                    if k in h:
+                        h.pop(k, None)
+
+                # Set browser-like headers
+                h.update(
+                    {
+                        "User-Agent": (
+                            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                            "AppleWebKit/537.36 (KHTML, like Gecko) "
+                            "Chrome/120.0.0.0 Safari/537.36"
+                        ),
+                        "Accept": "application/json, text/plain, */*",
+                        "Referer": "https://www.udemy.com/",
+                        "Origin": "https://www.udemy.com",
+                        "Accept-Language": "en-US,en;q=0.9",
+                        "X-Requested-With": "XMLHttpRequest",
+                    }
+                )
+
+                # If an access_token cookie is present, also set Bearer headers
+                access_token = None
+                try:
+                    # CookieJar may have multiple domains; pick from any udemy domain
+                    for c in cj:
+                        if c.name == "access_token" and (c.domain.endswith("udemy.com") or c.domain == ".udemy.com"):
+                            access_token = c.value.strip('"')
+                            break
+                except Exception:
+                    access_token = None
+
+                if access_token:
+                    h.update(
+                        {
+                            "authorization": f"Bearer {access_token}",
+                            "x-udemy-bearer-token": access_token,
+                        }
+                    )
+                    try:
+                        logger.info("> Attached bearer from cookies")
+                    except Exception:
+                        pass
+
+                # Also attach CSRF for POSTs if present
+                try:
+                    for c in cj:
+                        if c.name == "csrftoken" and (c.domain.endswith("udemy.com") or c.domain == ".udemy.com"):
+                            h["X-CSRFToken"] = c.value
+                            break
+                except Exception:
+                    pass
+            except Exception:
+                # Non-fatal; fall back to whatever headers we had
+                pass
+
     def _get_quiz(self, quiz_id):
         # self.session._headers.update(
         #     {
@@ -1998,9 +2064,10 @@ def main():
                 "authorization": f"Bearer {bearer_token}",
             }
         )
+        logger.info("> Using bearer token authentication")
     else:
-        logger.fatal("> use a bearer token")
-        sys.exit(1)
+        # No bearer token — continue with browser/file cookies loaded in Udemy().__init__
+        logger.info("> Using browser cookies for authentication")
 
     logger.info("> Fetching course information, this may take a minute...")
     if not load_from_file:
