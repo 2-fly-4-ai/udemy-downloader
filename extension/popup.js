@@ -70,6 +70,29 @@ function log(line) {
   logEl.scrollTop = logEl.scrollHeight;
 }
 
+// Wait for a specific native host response by id
+function waitForResponseById(id, timeoutMs = 15000) {
+  return new Promise((resolve, reject) => {
+    let done = false;
+    const timer = setTimeout(() => {
+      if (done) return;
+      done = true;
+      try { chrome.runtime.onMessage.removeListener(onMsg); } catch (_) {}
+      reject(new Error('timeout'));
+    }, timeoutMs);
+    function onMsg(msg) {
+      if (msg && msg.kind === 'response' && msg.id === id) {
+        if (done) return;
+        done = true;
+        clearTimeout(timer);
+        try { chrome.runtime.onMessage.removeListener(onMsg); } catch (_) {}
+        resolve(msg);
+      }
+    }
+    chrome.runtime.onMessage.addListener(onMsg);
+  });
+}
+
 chrome.runtime.onMessage.addListener((msg) => {
   if (msg.kind === 'event' && msg.type === 'host.ready') {
     log(`[host] ready: ${msg.root}`);
@@ -248,6 +271,35 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   // Attempt auto-pair across candidate ports (no-op if server not running)
   try { const id = chrome.runtime.id; await tryPair(id); } catch (_) {}
+});
+
+// Folder picker for Output folder (delegated to native host)
+$('browseOutDir')?.addEventListener('click', async () => {
+  const btn = $('browseOutDir');
+  if (btn) btn.disabled = true;
+  try {
+    const cur = $('outDir')?.value?.trim() || '';
+    const ack = await new Promise((resolve) => {
+      chrome.runtime.sendMessage({ type: 'companion.pickFolder', payload: { startIn: cur || undefined } }, resolve);
+    });
+    if (!ack || !ack.ok || !ack.id) {
+      log(`[err] pickFolder: ${ack && ack.error}`);
+      return;
+    }
+    const resp = await waitForResponseById(ack.id, 120000);
+    if (resp && resp.ok && resp.result && resp.result.path) {
+      const p = resp.result.path;
+      $('outDir').value = p;
+      await saveState();
+      log(`[ui] output folder set: ${p}`);
+    } else if (resp && !resp.ok) {
+      log(`[err] pickFolder: ${resp.error}`);
+    }
+  } catch (e) {
+    log(`[err] pickFolder: ${e}`);
+  } finally {
+    if (btn) btn.disabled = false;
+  }
 });
 
 $('reset').addEventListener('click', async () => {

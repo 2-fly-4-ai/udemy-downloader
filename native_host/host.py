@@ -86,6 +86,7 @@ else:
     ROOT = Path(__file__).resolve().parents[1]
 MAIN_PY = ROOT / 'main.py'
 BIN_DL_WIN = ROOT / 'bin' / 'udemy-downloader.exe'
+BIN_DL_UNIX = ROOT / 'bin' / 'udemy-downloader'
 TOOLS_DIR = ROOT / 'tools'
 COOKIES_PATH = ROOT / 'cookies.txt'
 VENV_PY_WIN = ROOT / 'venv' / 'Scripts' / 'python.exe'
@@ -117,12 +118,12 @@ def handle_info(req):
         # Diagnostics for where we expect binaries
         "root": str(ROOT),
         "bin_dir": str(BIN_DIR) if getattr(sys, 'frozen', False) else None,
-        "packaged_exe_expected": str(BIN_DL_WIN),
-        "packaged_exe_exists": BIN_DL_WIN.exists(),
+        "packaged_exe_expected": str(BIN_DL_WIN if os.name == 'nt' else BIN_DL_UNIX),
+        "packaged_exe_exists": (BIN_DL_WIN.exists() if os.name == 'nt' else BIN_DL_UNIX.exists()),
         # Legacy fields (kept for compatibility in UI)
         "main_py_exists": MAIN_PY.exists(),
         "main_py": str(MAIN_PY),
-        "packaged_exe": str(BIN_DL_WIN) if BIN_DL_WIN.exists() else None,
+        "packaged_exe": (str(BIN_DL_WIN) if os.name == 'nt' and BIN_DL_WIN.exists() else (str(BIN_DL_UNIX) if sys.platform == 'darwin' and BIN_DL_UNIX.exists() else None)),
     }
     _send_response(req.get("id"), True, result)
 
@@ -188,9 +189,11 @@ def handle_udemy_start(req):
             return
 
     job_id = str(uuid.uuid4())
-    # Prefer packaged downloader on Windows; keep Python path for non-Windows dev
+    # Prefer packaged downloader on Windows/macOS if available; Python fallback for dev
     if os.name == 'nt':
         args = [str(BIN_DL_WIN), "-c", course_url]
+    elif sys.platform == 'darwin' and BIN_DL_UNIX.exists():
+        args = [str(BIN_DL_UNIX), "-c", course_url]
     else:
         args = [PYTHON_FOR_MAIN, "-u", str(MAIN_PY), "-c", course_url]
 
@@ -429,12 +432,106 @@ def handle_udemy_cancel(req):
         _send_response(req.get("id"), False, error=f"cancel_failed: {e}")
 
 
+def handle_pick_folder(req):
+    """Show a native folder selection dialog and return the chosen path.
+    Response: { ok: true, result: { path: "..." } } or { ok: true } when canceled.
+    """
+    try:
+        payload = req.get("payload") or {}
+        start_in = payload.get("startIn") or ""
+        if not start_in or not os.path.isdir(start_in):
+            try:
+                start_in = str(Path.home())
+            except Exception:
+                start_in = os.getcwd()
+
+        # 1) Try Tkinter (cross-platform)
+        chosen = None
+        tk_err = None
+        try:
+            import tkinter as _tk  # type: ignore
+            from tkinter import filedialog as _fd  # type: ignore
+            root = _tk.Tk()
+            root.withdraw()
+            try:
+                # Keep dialog on top where possible
+                try:
+                    root.attributes('-topmost', True)
+                except Exception:
+                    pass
+                chosen = _fd.askdirectory(initialdir=start_in, title='Select output folder')
+            finally:
+                try:
+                    root.destroy()
+                except Exception:
+                    pass
+            if chosen:
+                chosen = str(chosen)
+        except Exception as e:
+            tk_err = e
+
+        # 2) OS-specific fallbacks if Tk failed or was unavailable
+        if not chosen:
+            try:
+                if os.name == 'nt':
+                    # PowerShell FolderBrowserDialog fallback
+                    ps = (
+                        "Add-Type -AssemblyName System.Windows.Forms; "
+                        "$f = New-Object System.Windows.Forms.FolderBrowserDialog; "
+                        f"$f.Description = 'Select output folder'; $f.SelectedPath = '{start_in.replace('\\', '/') }'; "
+                        "if ($f.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) { [Console]::WriteLine($f.SelectedPath) }"
+                    )
+                    out = subprocess.check_output(['powershell', '-NoProfile', '-Command', ps], text=True, timeout=120)
+                    out = (out or '').strip()
+                    if out:
+                        chosen = out
+                elif sys.platform == 'darwin':
+                    # AppleScript choose folder
+                    osa = (
+                        'set theFolder to POSIX path of (choose folder with prompt "Select output folder")\n'
+                        'do shell script "printf %s \\\"" & theFolder & "\\\""'
+                    )
+                    out = subprocess.check_output(['osascript', '-e', osa], text=True, timeout=120)
+                    out = (out or '').strip()
+                    if out:
+                        chosen = out
+                else:
+                    # Linux: zenity or kdialog if available
+                    def _which(x):
+                        from shutil import which
+                        return which(x) is not None
+                    if _which('zenity'):
+                        out = subprocess.check_output(['zenity', '--file-selection', '--directory', '--title=Select output folder', f'--filename={start_in}/'], text=True, timeout=120)
+                        out = (out or '').strip()
+                        if out:
+                            chosen = out
+                    elif _which('kdialog'):
+                        out = subprocess.check_output(['kdialog', '--getexistingdirectory', start_in], text=True, timeout=120)
+                        out = (out or '').strip()
+                        if out:
+                            chosen = out
+            except Exception:
+                pass
+
+        # Respond
+        if chosen and isinstance(chosen, str) and len(chosen) > 0:
+            _send_response(req.get("id"), True, {"path": chosen})
+        else:
+            # Treat cancel/no-selection as ok with no result (UI will ignore)
+            _send_response(req.get("id"), True, {})
+    except Exception as e:
+        _send_response(req.get("id"), False, error=f"pick_failed:{e}")
+
+
 HANDLERS = {
     "companion.ping": handle_ping,
     "companion.info": handle_info,
     # Open a file (e.g., current log) in the OS default app
     # Payload: { path: "C:\\...\\logs\\....log" }
     "companion.openLog": handle_open_log,
+    # Ask OS to show a folder picker and return the selected path
+    # Payload: { startIn: "C:\\..." }
+    "companion.pickFolder": handle_pick_folder,
     "udemy.start": handle_udemy_start,
     "udemy.cancel": handle_udemy_cancel,
 }
@@ -445,9 +542,29 @@ def _manifest_path_win() -> Path:
     return ROOT / 'com.serp.companion.json'
 
 
+def _manifest_path_macos() -> Path:
+    return Path.home() / 'Library' / 'Application Support' / 'Google' / 'Chrome' / 'NativeMessagingHosts' / 'com.serp.companion.json'
+
+
+def _manifest_path() -> Path:
+    if os.name == 'nt':
+        return _manifest_path_win()
+    elif sys.platform == 'darwin':
+        return _manifest_path_macos()
+    else:
+        # Linux default Chrome location
+        return Path.home() / '.config' / 'google-chrome' / 'NativeMessagingHosts' / 'com.serp.companion.json'
+
+
 def _write_manifest(ext_ids):
-    exe_path = str(BIN_DIR / 'serp-companion.exe') if getattr(sys, 'frozen', False) else str((ROOT / 'native_host' / 'run-host.bat'))
-    manifest_file = _manifest_path_win()
+    if getattr(sys, 'frozen', False):
+        exe_path = str(Path(sys.executable))
+    else:
+        if os.name == 'nt':
+            exe_path = str((ROOT / 'native_host' / 'run-host.bat'))
+        else:
+            exe_path = str((ROOT / 'native_host' / 'run-host.sh'))
+    manifest_file = _manifest_path()
     allowed = [f"chrome-extension://{eid}/" for eid in ext_ids]
     data = {
         "name": "com.serp.companion",
@@ -456,6 +573,11 @@ def _write_manifest(ext_ids):
         "type": "stdio",
         "allowed_origins": allowed,
     }
+    # Ensure parent exists for non-Windows (Windows writes to ROOT)
+    try:
+        manifest_file.parent.mkdir(parents=True, exist_ok=True)
+    except Exception:
+        pass
     manifest_file.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding='utf-8')
     return manifest_file
 
@@ -472,6 +594,19 @@ def _register_manifest_win(manifest_path: Path):
         return True, None
     except Exception as e:
         return False, f"reg_error:{e}"
+
+
+def _register_manifest(manifest_path: Path):
+    if os.name == 'nt':
+        return _register_manifest_win(manifest_path)
+    else:
+        # On macOS/Linux, writing the manifest file at the correct path is sufficient.
+        try:
+            manifest_path.parent.mkdir(parents=True, exist_ok=True)
+            ok = manifest_path.exists()
+            return (ok, None) if ok else (False, 'manifest_write_failed')
+        except Exception as e:
+            return False, f'manifest_error:{e}'
 
 
 class PairHandler(BaseHTTPRequestHandler):
@@ -491,7 +626,7 @@ class PairHandler(BaseHTTPRequestHandler):
             payload = {
                 'root': str(ROOT),
                 'bin': str(BIN_DIR) if getattr(sys, 'frozen', False) else None,
-                'manifest': str(_manifest_path_win()),
+                'manifest': str(_manifest_path()),
                 'ok': True,
             }
             body = json.dumps(payload).encode('utf-8')
@@ -516,7 +651,7 @@ class PairHandler(BaseHTTPRequestHandler):
                 return
             try:
                 mf = _write_manifest([ext_id])
-                ok, err = _register_manifest_win(mf)
+                ok, err = _register_manifest(mf)
                 res = {'ok': bool(ok), 'manifest': str(mf)}
                 if not ok:
                     res['error'] = err
@@ -586,8 +721,8 @@ def main():
     _send_event("host.ready", {
         "root": str(ROOT),
         "bin": str(BIN_DIR) if getattr(sys, 'frozen', False) else None,
-        "packagedExe": str(BIN_DL_WIN),
-        "packagedExeExists": BIN_DL_WIN.exists(),
+        "packagedExe": str(BIN_DL_WIN if os.name == 'nt' else BIN_DL_UNIX),
+        "packagedExeExists": (BIN_DL_WIN.exists() if os.name == 'nt' else BIN_DL_UNIX.exists()),
     })
     while True:
         req = _read_message()

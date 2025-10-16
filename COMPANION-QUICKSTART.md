@@ -28,6 +28,16 @@ Option B — Dev Mode (no installer)
 - Register host: `powershell -ExecutionPolicy Bypass -File native_host\install_host.ps1 -ExtensionId <YOUR_EXTENSION_ID>` → restart Chrome
 - Click “Ping” and “Info” to verify, then “Start” with a course URL
 
+Option C — macOS Build + Install
+- Build binaries on macOS:
+  - `packaging/macos/build.sh`
+  - Outputs: `bin/serp-companion`, `bin/udemy-downloader`
+- Optional DMG: `packaging/macos/make-dmg.sh` → `dist-installer/SERP-Companion-macOS.dmg`
+- Register host (choose one):
+  - From extension popup: click “Pair” (writes Chrome Native Messaging manifest)
+  - Or script: `native_host/install_host_macos.sh -e <YOUR_EXTENSION_ID>`
+- Tools: Put macOS binaries into repo `tools/` (`ffmpeg`, `yt-dlp`, `aria2c`, `packager`) to bundle or use Homebrew-installed tools on PATH
+
 Notes
 - Authentication uses `--browser chrome`; ensure you’re logged into Udemy in Chrome
 - The popup can extract cookies and pass them to the downloader as `cookies.txt` and will prefer those first. If a bearer token is provided, the host will retry with bearer only if the cookies run fails.

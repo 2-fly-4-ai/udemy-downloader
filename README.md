@@ -18,7 +18,7 @@
 # Description
 
 Utility script to download Udemy courses, has support for DRM videos but requires the user to acquire the decryption key (for legal reasons).<br>
-Windows is the primary development OS, but I've made an effort to support Linux also (Mac untested).
+Windows is the primary development OS, but Linux and macOS are supported (see platform build instructions).
 
 ## Windows Maintainer Quick Build
 
@@ -40,6 +40,28 @@ If you prefer manual setup instead:
 python -m venv venv && venv\Scripts\pip install -r requirements.txt pyinstaller
 packaging\windows\build.bat
 ```
+
+# macOS Maintainer Quick Build
+
+Build binaries:
+
+```
+packaging/macos/build.sh
+```
+
+This will:
+- Build `bin/serp-companion` and `bin/udemy-downloader`
+- You can optionally bundle macOS tools by placing them under `tools/` (`ffmpeg`, `yt-dlp`, `aria2c`, `packager`)
+
+Optional: create a DMG for distribution:
+
+```
+packaging/macos/make-dmg.sh
+```
+
+Register the Chrome Native Messaging host on macOS:
+- From the extension popup: click “Pair” (preferred), or
+- Script: `native_host/install_host_macos.sh -e <YOUR_EXTENSION_ID>`
 
 > [!IMPORTANT]  
 > This tool will not work on encrypted courses without decryption keys being provided!

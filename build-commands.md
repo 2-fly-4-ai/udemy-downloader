@@ -1,0 +1,1 @@
+powershell -ExecutionPolicy Bypass -File packaging\windows\dev.ps1 -Release

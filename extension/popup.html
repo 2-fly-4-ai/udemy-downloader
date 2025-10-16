@@ -110,7 +110,10 @@
         </div>
         <div class="row">
           <label class="block">Output folder</label>
-          <input id="outDir" type="text" placeholder="Leave blank for default (Videos\\Udemy)" />
+          <div class="inline">
+            <input id="outDir" type="text" placeholder="Leave blank for default (Videos\\Udemy)" style="flex:1;" />
+            <button id="browseOutDir" title="Choose output folder">Browse…</button>
+          </div>
         </div>
         <div class="row btns">
           <button id="ping">Ping</button>
