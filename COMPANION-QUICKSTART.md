@@ -28,15 +28,15 @@ Option B — Dev Mode (no installer)
 - Register host: `powershell -ExecutionPolicy Bypass -File native_host\install_host.ps1 -ExtensionId <YOUR_EXTENSION_ID>` → restart Chrome
 - Click “Ping” and “Info” to verify, then “Start” with a course URL
 
-Option C — macOS Build + Install
-- Build binaries on macOS:
-  - `packaging/macos/build.sh`
-  - Outputs: `bin/serp-companion`, `bin/udemy-downloader`
-- Optional DMG: `packaging/macos/make-dmg.sh` → `dist-installer/SERP-Companion-macOS.dmg`
-- Register host (choose one):
-  - From extension popup: click “Pair” (writes Chrome Native Messaging manifest)
-  - Or script: `native_host/install_host_macos.sh -e <YOUR_EXTENSION_ID>`
-- Tools: Put macOS binaries into repo `tools/` (`ffmpeg`, `yt-dlp`, `aria2c`, `packager`) to bundle or use Homebrew-installed tools on PATH
+Option C — macOS Build + Installer
+- Configure `packaging/macos/config.mk` with your Chrome extension ID.
+- Build on macOS: `make macos-release`
+  - Produces `dist-installer/serpcompanion.pkg` plus refreshed binaries in `bin/`
+  - Place macOS versions of `ffmpeg`, `yt-dlp`, `aria2c`, `packager`, etc. into `tools/` before running the Make target if you want them bundled.
+- Install (user):
+  - Run the PKG (requires admin). It copies the app into `/Applications`, registers the native messaging manifest, and launches the pair server automatically.
+  - Install the Chrome extension from the Web Store and click “Ping” / “Info” to verify connectivity.
+- Dev mode (no installer): still supported via `packaging/macos/build.sh` + `native_host/install_host_macos.sh -e <YOUR_EXTENSION_ID>` if you need a manual workflow.
 
 Notes
 - Authentication uses `--browser chrome`; ensure you’re logged into Udemy in Chrome

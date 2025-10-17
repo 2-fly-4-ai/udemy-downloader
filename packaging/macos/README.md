@@ -1,48 +1,48 @@
 macOS Packaging
+================
 
-Overview
-- Build PyInstaller binaries for macOS (serp-companion and udemy-downloader)
-- Bundle optional tools in a `tools/` folder next to the binaries
-- Optionally create a DMG or ZIP for distribution
-- Register Chrome Native Messaging host either via the Companion’s Pair action or the provided install script
+The Makefile now handles the entire macOS workflow: build the binaries, bundle tools, stage the `.app`, and generate a ready-to-install PKG. The DMG flow documented previously has been retired.
 
-Prereqs
-- macOS with Python 3.
-- Xcode Command Line Tools (for `hdiutil` and general build tools).
-- Optional: Homebrew for installing `ffmpeg`, `aria2`, `shaka-packager`, or to place macOS binaries under `tools/` to bundle.
+## Quick Start
 
-Build Binaries
+```bash
+# 1. Verify packaging/macos/config.mk contains your Chrome extension ID
+# 2. Optionally copy helper binaries into tools/
+make macos-release        # or make macos-installer
 ```
+
+Artifacts:
+- `dist-installer/serpcompanion.pkg`
+- `bin/serp-companion`, `bin/udemy-downloader`
+- Staged bundle under `build/macos/serpcompanion.app`
+
+## Bundling Optional Tools
+
+Create a `tools/` folder at the repo root and drop macOS builds of:
+- `ffmpeg`
+- `yt-dlp`
+- `aria2c`
+- `packager` (Shaka Packager)
+
+Any executables in `tools/` are copied into `serpcompanion.app/Contents/Resources/tools` during the build and shipped with the PKG. Ensure they are executable (`chmod +x tools/*`).
+
+## PKG Post-Install Actions
+
+The generated PKG:
+- Installs the app to `/Applications/serpcompanion.app`
+- Writes `/Library/Application Support/Google/Chrome/NativeMessagingHosts/com.serp.companion.json`
+- Installs `/Library/LaunchAgents/com.serp.companion.pairserver.plist` and bootstraps it for the console user
+- Drops `Contents/Resources/uninstall.sh` for cleanup
+
+Codesign/notarize the PKG (and optionally the app bundle) before distributing releases.
+
+## Development Mode (Manual)
+
+If you only need binaries without packaging:
+
+```bash
 packaging/macos/build.sh
+native_host/install_host_macos.sh -e <EXTENSION_ID>   # optional manual manifest registration
 ```
-Outputs:
-- `bin/serp-companion` (GUI-less app used as Chrome Native Messaging host)
-- `bin/udemy-downloader` (CLI downloader)
 
-Bundle Tools (optional)
-- Create a `tools/` folder at repo root and place macOS binaries:
-  - `tools/ffmpeg`, `tools/yt-dlp`, `tools/aria2c`, `tools/packager` (aka shaka-packager)
-  - The Companion prepends `{root}/tools` to PATH when spawning the downloader.
-
-Create DMG (optional)
-```
-packaging/macos/make-dmg.sh
-```
-Outputs:
-- `dist-installer/SERP-Companion-macOS.dmg`
-
-Register Native Host (macOS)
-Option A — From the extension (recommended):
-- Click Pair in the popup. On macOS the host writes the Chrome Native Messaging manifest to:
-  - `~/Library/Application Support/Google/Chrome/NativeMessagingHosts/com.serp.companion.json`
-
-Option B — Script:
-```
-native_host/install_host_macos.sh -e <YOUR_EXTENSION_ID> [-p /path/to/serp-companion]
-```
-- `-p` is optional; if omitted, it will try to use `bin/serp-companion`
-
-Notes
-- Codesigning/notarization is not configured. For distribution outside Gatekeeper warnings, sign binaries and the DMG with your Apple Developer ID.
-- Universal2 builds are supported by PyInstaller when invoked on Apple Silicon with appropriate flags; this script builds for the current arch by default.
-
+This keeps the old developer workflow intact for quick local testing.

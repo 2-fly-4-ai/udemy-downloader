@@ -475,10 +475,11 @@ def handle_pick_folder(req):
             try:
                 if os.name == 'nt':
                     # PowerShell FolderBrowserDialog fallback
+                    ps_start_path = start_in.replace('\\', '/')
                     ps = (
                         "Add-Type -AssemblyName System.Windows.Forms; "
                         "$f = New-Object System.Windows.Forms.FolderBrowserDialog; "
-                        f"$f.Description = 'Select output folder'; $f.SelectedPath = '{start_in.replace('\\', '/') }'; "
+                        f"$f.Description = 'Select output folder'; $f.SelectedPath = '{ps_start_path}'; "
                         "if ($f.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) { [Console]::WriteLine($f.SelectedPath) }"
                     )
                     out = subprocess.check_output(['powershell', '-NoProfile', '-Command', ps], text=True, timeout=120)
