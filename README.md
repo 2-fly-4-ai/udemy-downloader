@@ -43,25 +43,19 @@ packaging\windows\build.bat
 
 # macOS Maintainer Quick Build
 
-Build binaries:
-
 ```
-packaging/macos/build.sh
+# optional: edit packaging/macos/config.mk to set your Chrome extension ID
+make macos-release
 ```
 
 This will:
-- Build `bin/serp-companion` and `bin/udemy-downloader`
-- You can optionally bundle macOS tools by placing them under `tools/` (`ffmpeg`, `yt-dlp`, `aria2c`, `packager`)
+- Refresh `bin/serp-companion` and `bin/udemy-downloader`
+- Assemble `serpcompanion.app`
+- Emit `dist-installer/serpcompanion.pkg` (copies the app to `/Applications`, registers the Chrome native-messaging manifest, installs the pair-server LaunchAgent)
 
-Optional: create a DMG for distribution:
+To bundle helper binaries (ffmpeg, yt-dlp, aria2c, packager, etc.), drop their macOS builds into `tools/` before running the Make target.
 
-```
-packaging/macos/make-dmg.sh
-```
-
-Register the Chrome Native Messaging host on macOS:
-- From the extension popup: click “Pair” (preferred), or
-- Script: `native_host/install_host_macos.sh -e <YOUR_EXTENSION_ID>`
+Dev-mode without the installer is still available via `packaging/macos/build.sh` plus `native_host/install_host_macos.sh -e <EXTENSION_ID>`, but the PKG provides the full zero-config experience.
 
 > [!IMPORTANT]  
 > This tool will not work on encrypted courses without decryption keys being provided!

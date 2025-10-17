@@ -214,24 +214,17 @@ powershell -ExecutionPolicy Bypass -File packaging\windows\dev.ps1 -Release
 
 ### macOS (Supported)
 
-**Build Script:** `packaging/macos/build.sh`
+**Build Command:** `make macos-release` (or `make macos-installer`)
 
-**Installation Process:**
-1. Build binaries with PyInstaller
-2. Copy to `bin/` (universal binaries)
-3. Optional: Bundle tools in `tools/` directory
-4. Create DMG: `packaging/macos/make-dmg.sh`
-5. Register manifest: `~/Library/Application Support/Google/Chrome/NativeMessagingHosts/com.serp.companion.json`
+**Installation Process (PKG):**
+1. PyInstaller builds `bin/serp-companion` and `bin/udemy-downloader`.
+2. `serpcompanion.app` is staged under `build/macos/`.
+3. `dist-installer/serpcompanion.pkg` installs the app into `/Applications`, writes `/Library/Application Support/Google/Chrome/NativeMessagingHosts/com.serp.companion.json`, and installs `/Library/LaunchAgents/com.serp.companion.pairserver.plist`.
+4. Optional tools placed in `tools/` are bundled into the app.
 
-**Manual Registration:**
-- Extension popup: Click "Pair Desktop"
-- Script: `native_host/install_host_macos.sh -e <EXT_ID>`
-
-**Build Command:**
-```bash
-packaging/macos/build.sh
-packaging/macos/make-dmg.sh  # Optional DMG creation
-```
+**Dev Mode (no installer):**
+- Run `packaging/macos/build.sh`.
+- Register the manifest manually with `native_host/install_host_macos.sh -e <EXT_ID>` or via the extension’s “Pair Desktop” button.
 
 ### Linux (Supported)
 
@@ -288,9 +281,9 @@ C:\Program Files\SERP Companion\
 └── logs\                      # Runtime logs
 ```
 
-**macOS:**
+**macOS (after PKG install):**
 ```
-/Applications/SERP Companion.app/  # (if using DMG)
+/Applications/serpcompanion.app/
 ~/Library/Application Support/Google/Chrome/NativeMessagingHosts/
 └── com.serp.companion.json
 ```
@@ -364,26 +357,20 @@ User must obtain and provide decryption keys for DRM content:
 
 ### macOS Build Pipeline
 
-1. **Build binaries:**
+1. **Quick build + installer:**
+   ```bash
+   # Update packaging/macos/config.mk with your Chrome extension ID first
+   make macos-release
+   ```
+   - Creates universal binaries in `bin/`
+   - Bundles any helpers found under `tools/`
+   - Produces `dist-installer/serpcompanion.pkg`
+
+2. **Manual (dev) build only:**
    ```bash
    packaging/macos/build.sh
+   native_host/install_host_macos.sh -e <EXT_ID>  # if you skip the PKG
    ```
-   - Creates `bin/serp-companion` and `bin/udemy-downloader`
-
-2. **Bundle tools (optional):**
-   ```bash
-   mkdir -p tools
-   cp /usr/local/bin/ffmpeg tools/
-   cp /usr/local/bin/yt-dlp tools/
-   cp /usr/local/bin/aria2c tools/
-   cp /path/to/packager tools/
-   ```
-
-3. **Create DMG (optional):**
-   ```bash
-   packaging/macos/make-dmg.sh
-   ```
-   - Output: `dist-installer/SERP-Companion-macOS.dmg`
 
 ## Troubleshooting
 
